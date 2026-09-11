@@ -24,10 +24,7 @@ function logsHandler() {
     downloadLogs() {
       this.loading = true;
       this.message = "";
-      const token = localStorage.getItem("apiToken") || "";
-      fetch("/api/v1/logs/download", {
-        headers: { Authorization: "Bearer " + token },
-      })
+      return apiFetch("/api/v1/logs/download")
         .then((r) => {
           if (!r.ok) throw new Error("Download failed");
           return r.blob();

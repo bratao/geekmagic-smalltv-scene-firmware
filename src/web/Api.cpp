@@ -52,6 +52,8 @@ static void otaHandleEnd(HTTPUpload& upload, int mode);
 static void otaHandleAborted(HTTPUpload& upload);
 void handleDeleteGif(Webserver* webserver);
 static auto requireBearerToken(Webserver* webserver) -> bool;
+void handleWifiNetworksGet(Webserver* webserver);
+void handleWifiNetworksPut(Webserver* webserver);
 
 static constexpr int WIFI_CONNECT_TIMEOUT_MS = 15000;
 static constexpr size_t NTP_CONFIG_DOC_SIZE = 512;
@@ -65,6 +67,31 @@ static constexpr int BEARER_LEN = 7;
  */
 void registerApiEndpoints(Webserver* webserver) {
     Logger::info("Registering API endpoints", "API");
+    // Explicit local-web access: no browser-stored credential is needed.
+    // A custom header plus strict local-IP Host/Origin prevents cross-site reads.
+    webserver->raw().collectHeaders("Origin", "X-SmallTV-Web", "Sec-Fetch-Site");
+    webserver->raw().on("/api/v1/web/token", HTTP_GET, [webserver]() {
+        auto& server=webserver->raw();
+        const String host=server.hostHeader();
+        const String sta=WiFi.localIP().toString();
+        const String ap=WiFi.softAPIP().toString();
+        const bool localHost=(sta!="0.0.0.0" && (host==sta || host==sta+":80")) ||
+                             (ap!="0.0.0.0" && (host==ap || host==ap+":80"));
+        const String origin=server.header("Origin");
+        const String site=server.header("Sec-Fetch-Site");
+        server.sendHeader("Cache-Control","no-store");
+        server.sendHeader("X-Content-Type-Options","nosniff");
+        if (!localHost || server.header("X-SmallTV-Web")!="1" ||
+            (origin.length() && origin!="http://"+host) ||
+            (site.length() && site!="same-origin")) {
+            server.send(403,"application/json","{\"status\":\"local_web_only\"}");return;
+        }
+        JsonDocument doc;doc["token"]=configManager.getApiToken();
+        String body;serializeJson(doc,body);
+        // Deliberately omit CORS: only the device's own web origin can read this.
+        server.send(200,"application/json",body);
+    });
+
 
     // @openapi {get} /wifi/scan version=v1 group=WiFi summary="Scan available WiFi networks" requiresAuth=true
     // responses=200:application/json,401:application/json
@@ -79,6 +106,8 @@ void registerApiEndpoints(Webserver* webserver) {
     // @openapi {get} /wifi/status version=v1 group=WiFi summary="Get WiFi connection status" requiresAuth=true
     // responses=200:application/json,401:application/json
     webserver->raw().on("/api/v1/wifi/status", HTTP_GET, [webserver]() { handleWifiStatus(webserver); });
+    webserver->raw().on("/api/v1/wifi/networks", HTTP_GET, [webserver]() { handleWifiNetworksGet(webserver); });
+    webserver->raw().on("/api/v1/wifi/networks", HTTP_PUT, [webserver]() { handleWifiNetworksPut(webserver); });
 
     // @openapi {post} /ntp/sync version=v1 group=NTP summary="Trigger NTP sync" requiresAuth=true
     // responses=200:application/json,401:application/json
@@ -297,7 +326,7 @@ void registerApiEndpoints(Webserver* webserver) {
         if (!requireBearerToken(webserver)) { return; }
         setCorsHeaders(webserver);
         webserver->raw().send(200, "application/json",
-            "{\"preserve_gif_screen\":true,\"gif_last_frame_delay\":true,\"drawing_api\":true,\"native_scene\":true,\"patch\":\"display3\"}");
+            "{\"preserve_gif_screen\":true,\"gif_last_frame_delay\":true,\"drawing_api\":true,\"native_scene\":true,\"wifi_profiles\":3,\"wifi_async\":true,\"web_revision\":\"wifi3\",\"patch\":\"scene3-web\"}");
     });
 
     // @openapi {delete} /gif version=v1 group=GIF summary="Delete a GIF by name" requiresAuth=true
@@ -346,7 +375,7 @@ void registerApiEndpoints(Webserver* webserver) {
  */
 void setCorsHeaders(Webserver* webserver) {
     webserver->raw().sendHeader("Access-Control-Allow-Origin", "*");
-    webserver->raw().sendHeader("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
+    webserver->raw().sendHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
     webserver->raw().sendHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
     webserver->raw().sendHeader("Access-Control-Max-Age", "3600");
 }
@@ -436,6 +465,9 @@ void handleTokenSave(Webserver* webserver) {
     if (!requireBearerToken(webserver)) {
         return;
     }
+    if (webserver->raw().arg("plain").length()>512) {
+        webserver->raw().send(413,"application/json","{\"status\":\"error\",\"message\":\"Token request too large\"}");return;
+    }
 
     if (!webserver->raw().hasArg("plain") || webserver->raw().arg("plain").length() == 0) {
         JsonDocument doc;
@@ -473,10 +505,15 @@ void handleTokenSave(Webserver* webserver) {
 
     const char* newToken = ddoc["token"] | "";
 
-    if (strlen(newToken) == 0) {
+    bool validToken=ddoc["token"].is<const char*>() && strlen(newToken)>0 && strlen(newToken)<=128;
+    if (validToken) {
+        validToken=ddoc["token"].as<JsonString>().size()==strlen(newToken);
+        for (const char* c=newToken;*c;++c) if (uint8_t(*c)<33 || uint8_t(*c)>126) validToken=false;
+    }
+    if (!validToken) {
         JsonDocument doc;
         doc["status"] = "error";
-        doc["message"] = "token field is required";
+        doc["message"] = "Token must contain 1 to 128 printable ASCII characters without spaces";
 
         String json;
         serializeJson(doc, json);
@@ -489,8 +526,14 @@ void handleTokenSave(Webserver* webserver) {
         return;
     }
 
+    const std::string previousToken=configManager.getApiToken();
     configManager.setApiToken(newToken);
-    configManager.save();
+    if (!configManager.save()) {
+        configManager.setApiToken(previousToken.c_str());
+        setCorsHeaders(webserver);
+        webserver->raw().send(507,"application/json","{\"status\":\"error\",\"message\":\"Could not persist token; previous token retained\"}");
+        return;
+    }
 
     JsonDocument doc;
     doc["status"] = "ok";
@@ -837,6 +880,7 @@ void handleNtpSync(Webserver* webserver) {
 
     bool syncOk = ntpClient->syncNow();
     doc["status"] = syncOk ? "ok" : "error";
+    doc["pending"] = syncOk;
     doc["lastStatus"] = ntpClient->lastStatus();
     doc["lastSyncTime"] = ntpClient->lastSyncTime();
 
@@ -844,7 +888,7 @@ void handleNtpSync(Webserver* webserver) {
     serializeJson(doc, json);
 
     setCorsHeaders(webserver);
-    webserver->raw().send(HTTP_CODE_OK, "application/json", json);
+    webserver->raw().send(syncOk ? 202 : 503, "application/json", json);
 }
 
 /**
@@ -1406,120 +1450,7 @@ void handleDeleteGif(Webserver* webserver) {
 /**
  * @brief Handle WiFi scan
  */
-void handleWifiScan(Webserver* webserver) {
-    if (!requireBearerToken(webserver)) {
-        return;
-    }
-
-    JsonDocument doc;
-    JsonArray networks = doc["networks"].to<JsonArray>();
-
-    if (wifiManager != nullptr) {
-        WiFiManager::scanNetworks(networks);
-    }
-
-    String out;
-    serializeJson(doc["networks"], out);
-
-    setCorsHeaders(webserver);
-    webserver->raw().send(HTTP_CODE_OK, "application/json", out);
-}
-
-/**
- * @brief Handle WiFi connect request
- */
-void handleWifiConnect(Webserver* webserver) {
-    if (!requireBearerToken(webserver)) {
-        return;
-    }
-
-    String body = webserver->raw().arg("plain");
-    JsonDocument doc;
-    DeserializationError err = deserializeJson(doc, body);
-
-    if (err) {
-        JsonDocument resp;
-
-        resp["status"] = "error";
-        resp["message"] = "invalid json";
-
-        String jsonOut;
-        serializeJson(resp, jsonOut);
-
-        setCorsHeaders(webserver);
-        webserver->raw().send(HTTP_CODE_INTERNAL_ERROR, "application/json", jsonOut);
-
-        return;
-    }
-
-    const char* ssid = doc["ssid"] | "";
-    const char* password = doc["password"] | "";
-
-    if (strlen(ssid) == 0) {
-        JsonDocument resp;
-
-        resp["status"] = "error";
-        resp["message"] = "missing ssid";
-
-        String jsonOut;
-
-        serializeJson(resp, jsonOut);
-
-        setCorsHeaders(webserver);
-        webserver->raw().send(HTTP_CODE_INTERNAL_ERROR, "application/json", jsonOut);
-
-        return;
-    }
-
-    bool connectOk = false;
-    if (wifiManager != nullptr) {
-        connectOk = wifiManager->connectToNetwork(ssid, password, WIFI_CONNECT_TIMEOUT_MS);
-    }
-
-    JsonDocument resp;
-
-    resp["status"] = connectOk ? "connected" : "error";
-    resp["ssid"] = ssid;
-
-    if (connectOk) {
-        resp["ip"] = wifiManager->getIP().toString();
-        configManager.setWiFi(ssid, password);
-        configManager.save();
-    }
-
-    if (!connectOk) {
-        resp["message"] = "failed to connect";
-    }
-
-    String jsonOut;
-    serializeJson(resp, jsonOut);
-
-    setCorsHeaders(webserver);
-    webserver->raw().send(HTTP_CODE_OK, "application/json", jsonOut);
-}
-
-/**
- * @brief WiFi status
- */
-void handleWifiStatus(Webserver* webserver) {
-    if (!requireBearerToken(webserver)) {
-        return;
-    }
-
-    JsonDocument resp;
-
-    bool connected = (wifiManager != nullptr) && WiFiManager::isConnected();
-
-    resp["connected"] = connected;
-    resp["ssid"] = connected ? WiFiManager::getConnectedSSID() : "";
-    resp["ip"] = connected ? wifiManager->getIP().toString() : "";
-
-    String jsonOut;
-    serializeJson(resp, jsonOut);
-
-    setCorsHeaders(webserver);
-    webserver->raw().send(HTTP_CODE_OK, "application/json", jsonOut);
-}
+#include "WifiRoutes.inc"
 
 /**
  * @brief Handle OTA start

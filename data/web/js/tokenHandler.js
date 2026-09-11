@@ -11,17 +11,30 @@ function tokenHandler() {
     loading: false,
     hasStoredToken: false,
 
-    init() {
-      const stored = localStorage.getItem(storageKey) || "";
-      this.token = stored;
-      this.hasStoredToken = !!stored;
-      this.statusMsg = stored
-        ? "Token loaded from browser storage."
-        : "No token stored yet.";
+    async init() {
+      this.onPageShow = event => { if (event.persisted) this.loadDeviceToken(); };
+      window.addEventListener("pageshow", this.onPageShow);
+      await this.loadDeviceToken();
+    },
+
+    async loadDeviceToken() {
+      this.loading = true;
+      this.showToken = false;
+      try {
+        this.token = await loadWebToken(true);
+        this.hasStoredToken = true;
+        this.statusMsg = "Current token loaded automatically from the TV.";
+      } catch (_) {
+        this.statusMsg = "Could not load the TV token. Reload when the device is reachable.";
+      } finally { this.loading = false; }
+    },
+
+    destroy() {
+      window.removeEventListener("pageshow", this.onPageShow);
     },
 
     async saveToken() {
-      const trimmed = this.token.trim();
+      const trimmed = normalizeToken(this.token);
 
       if (!trimmed) {
         this.statusMsg = "Please enter a token.";
@@ -34,22 +47,19 @@ function tokenHandler() {
       try {
         const res = await fetch("/api/v1/token/check", {
           method: "GET",
+          redirect: "error",
           headers: { Authorization: "Bearer " + trimmed },
         });
         if (!res.ok) {
-          let msg = "Invalid token.";
-
-          try {
-            const data = await res.json();
-            msg = data.error || data.message || msg;
-          } catch (e) {}
-
-          this.statusMsg = msg;
+          this.statusMsg = res.status === 401
+            ? "Invalid token for this device. Check the token and try again."
+            : "Token check failed (HTTP " + res.status + ").";
 
           return;
         }
 
-        localStorage.setItem(storageKey, trimmed);
+        rememberWebToken(trimmed);
+        this.token = trimmed;
         this.hasStoredToken = true;
         this.statusMsg = "Token valid and saved.";
       } catch (e) {
@@ -60,8 +70,8 @@ function tokenHandler() {
     },
 
     async changeToken() {
-      const current = this.token.trim();
-      const next = this.newToken.trim();
+      const current = normalizeToken(this.token);
+      const next = normalizeToken(this.newToken);
 
       if (!current) {
         this.changeStatusMsg = "No current token available.";
@@ -80,6 +90,7 @@ function tokenHandler() {
       try {
         const res = await fetch("/api/v1/token/save", {
           method: "POST",
+          redirect: "error",
           headers: {
             "Content-Type": "application/json",
             Authorization: "Bearer " + current,
@@ -88,19 +99,14 @@ function tokenHandler() {
         });
 
         if (!res.ok) {
-          let msg = "Token update failed.";
-          try {
-            const data = await res.json();
-            msg = data.error || data.message || msg;
-          } catch (e) {
-            // ignore
-          }
-          this.changeStatusMsg = msg;
+          this.changeStatusMsg = res.status === 401
+            ? "Current token rejected. Validate the current token first."
+            : "Token update failed (HTTP " + res.status + ").";
 
           return;
         }
 
-        localStorage.setItem(storageKey, next);
+        rememberWebToken(next);
         this.token = next;
         this.newToken = "";
         this.hasStoredToken = true;
@@ -117,7 +123,8 @@ function tokenHandler() {
       this.token = "";
       this.newToken = "";
       this.hasStoredToken = false;
-      this.statusMsg = "Token removed.";
+      this.statusMsg = "Browser entry cleared. The TV token will load automatically on the next request.";
+      webToken = "";
     },
   };
 }

@@ -8,6 +8,93 @@ Authorization: Bearer SEU_TOKEN
 
 O token é o configurado na interface web do seu dispositivo. A API é HTTP na rede local. Não exponha diretamente a TV à internet.
 
+Current source version: **`v1.5.0-smalltv-scene3-web`**. This version adds the Wi-Fi and authentication behavior below; existing drawing contracts remain unchanged.
+
+## WiFi profiles — scene2-wifi
+
+All routes in this section require the Bearer header above. Request bodies are JSON, limited to **2,048 bytes**. No profile response includes a password.
+
+### GET /wifi/networks
+
+Returns the saved networks in priority order:
+
+```json
+{"networks":[{"ssid":"EXAMPLE_NETWORK","has_password":true}],"max_networks":3}
+```
+
+### PUT /wifi/networks
+
+Replaces the complete ordered list, with zero to three unique SSIDs. Saving **does not reconnect**:
+
+```json
+{"networks":[
+  {"ssid":"EXAMPLE_NETWORK"},
+  {"ssid":"SECOND_NETWORK","password":"YOUR_WIFI_PASSWORD"},
+  {"ssid":"OPEN_NETWORK","password":""}
+]}
+```
+
+Omitting `password` preserves the saved password only when the SSID exactly matches an existing profile. A new or renamed SSID must include `password`; an empty string explicitly represents an open network. Duplicate SSIDs and invalid credential lengths are rejected. Success: `200 {"status":"saved"}`. `409` means a connection is in progress. `507` means persistence failed; the previous settings are retained. This is full replacement: leaving a profile out removes it from the saved list.
+
+### GET /wifi/scan
+
+Starts an asynchronous scan when idle, or polls a pending scan. While pending:
+
+```http
+HTTP/1.1 202 Accepted
+```
+
+```json
+{"status":"scanning"}
+```
+
+On completion, HTTP 200 returns an array of networks with `ssid`, `rssi` and `enc`. HTTP 409 indicates Wi-Fi is connecting; HTTP 503 indicates a scan error. Poll about once per second with a bounded timeout, rather than issuing concurrent scans. The web page stops polling after 20 pending responses and offers cancel/retry. Cancelling the browser wait does not cancel the radio scan already started on the device.
+
+### POST /wifi/connect
+
+Connect using a saved password without transmitting it again:
+
+```json
+{"ssid":"EXAMPLE_NETWORK"}
+```
+
+An explicit `password` updates an existing profile or adds a new one if capacity permits; new profiles require it, with `""` allowed for an open network. The network is persisted before connection is scheduled. Success is an acceptance response, **not proof of association**:
+
+```http
+HTTP/1.1 202 Accepted
+```
+
+```json
+{"status":"connecting","message":"Network saved. Connection starts shortly; the device IP may change."}
+```
+
+The response is sent before switching Wi-Fi. The browser may lose connectivity; read the new IP on the display and reopen the device there. HTTP 409 indicates Wi-Fi is busy or the three-profile list is full; HTTP 507 indicates a persistence failure. If scheduling fails after saving, the error explicitly says the network was saved and the connection should be retried.
+
+### GET /wifi/status
+
+Returns `connected`, `connecting`, `ap_mode`, `ssid`, `ip` and `saved_networks`. A completed connection or fallback to the device access point should end a client's busy indicator. Avoid treating every disconnected state as an indefinitely pending request.
+
+## Persisted token and browser origin
+
+`GET /token/check` validates the supplied Bearer token. `POST /token/save` accepts `{"token":"YOUR_NEW_TOKEN"}` authenticated with the current token and persists the update to device configuration. Use the new token for later calls after a successful save, including after reboot.
+
+### GET /web/token — automatic local web authorization
+
+The web UI calls this endpoint without Bearer authentication, with `X-SmallTV-Web: 1`, to retrieve `{"token":"CURRENT_SAVED_TOKEN"}`. The endpoint accepts the device's literal local IP Host and same-origin browser context only; it does not provide CORS permission, and the response is non-cacheable. Use the IP shown on the TV rather than an arbitrary hostname. Do not log the response or put it in a URL.
+
+This is an intentional local-network trust model: someone who can open the local device UI can obtain its token. The custom header and origin checks restrict cross-origin browser access, not a trusted-LAN client that constructs HTTP requests. Other control routes continue to require Bearer authentication. Do not expose this interface to untrusted networks.
+
+The UI shares a single pending token request between simultaneous calls, keeps the result in memory and browser storage, and automatically retries a 401 once with a refreshed token. A fresh origin or a page restored through browser history reloads the saved token from the TV. `/token.html` prefills the current token masked; explicit manual changes remain supported. Requests to external origins are rejected before loading or attaching the token. Logs and OTA also obtain current authorization automatically; firmware upload bodies are not automatically replayed.
+
+Updated Wi-Fi/token/logs/OTA pages and required scripts are embedded in scene3-web firmware and override their older LittleFS copies. Install **firmware only** through `/ota/fw`; do not upload a filesystem image for this upgrade. Other filesystem content and saved configuration remain intact.
+
+
+Recovery limitation: corrupt, nonblank secure NVS is intentionally not overwritten automatically. Token reset cannot persist through `secure.put` while the corruption remains. Keep an appropriate backup and use explicit physical serial recovery to diagnose/repair this case; neither a web token reset nor a firmware-only update guarantees recovery from all storage corruption.
+
+## Asynchronous NTP synchronization
+
+`POST /ntp/sync` now returns HTTP **202** with `{"status":"ok","pending":true}` when synchronization is scheduled. HTTP **503** means the device is offline. The accepted response preserves `status:"ok"` for clients but does not confirm a completed synchronization. Query `GET /ntp/status` later rather than blocking or polling repeatedly in the request path.
+
 ## Dois modos de desenho
 
 | Modo | Uso | Atualização |
@@ -183,21 +270,24 @@ Estas são operações upstream; veja os handlers em `src/web/Api.cpp` para resp
 
 | Método e rota | Uso / corpo principal |
 | --- | --- |
-| `GET /wifi/scan` | Listar redes |
-| `GET /wifi/status` | Estado Wi-Fi |
-| `POST /wifi/connect` | `{"ssid":"REDE","password":"SENHA"}`; pode interromper conectividade |
+| `GET /wifi/scan` | Async scan: 202 pending, 200 array; see Wi-Fi section |
+| `GET /wifi/status` | Connection/AP state and saved profile count |
+| `GET /wifi/networks` | Saved ordered profiles, no passwords |
+| `PUT /wifi/networks` | Replace up to three profiles without reconnecting |
+| `POST /wifi/connect` | Connect saved SSID; 202 before switching Wi-Fi |
 | `GET /ntp/status` | Estado e última sincronização |
 | `GET /ntp/config` | Servidor NTP |
 | `POST /ntp/config` | `{"ntp_server":"pool.ntp.org"}` |
-| `POST /ntp/sync` | Sincronizar relógio; pode bloquear durante tentativas |
+| `POST /ntp/sync` | Async: 202 `status:ok,pending:true`; 503 offline |
 | `GET /display/rotation` | Rotação atual |
 | `POST /display/rotation` | `{"rotation":0}`; siga valores aceitos pelo handler |
 | `POST /reboot` | Reiniciar dispositivo |
 | `GET /gif` | Listar GIFs |
 | `POST /gif` | Upload multipart de GIF |
 | `DELETE /gif` | `{"name":"example.gif"}` |
+| `GET /web/token` | Automatic same-origin local-IP web bootstrap; requires `X-SmallTV-Web: 1` |
 | `GET /token/check` | Verificar token |
-| `POST /token/save` | Configurar token, conforme interface web |
+| `POST /token/save` | Persist token, authenticated with the current token |
 | `GET /logs` | Logs recentes |
 | `GET /logs/download` | Download dos logs |
 | `POST /logs/clear` | Limpar buffer de logs |

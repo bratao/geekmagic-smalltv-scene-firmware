@@ -30,6 +30,8 @@ class SecureStorage {
     bool put(const char* key, const char* value);
     bool remove(const char* key);
     String get(const char* key, const char* defaultValue = nullptr);
+    JsonVariantConst getValue(const char* key) const { return _doc[key]; }
+    bool update(JsonObjectConst changes);
 
     // Set the public salt (should be called before begin())
     static void setSalt(const String& salt);
@@ -37,7 +39,7 @@ class SecureStorage {
    private:
     size_t _eepromSize;
     bool loadToMemory();
-    bool flushToEEPROM();
+    bool flushToEEPROM(const JsonDocument& document);
     JsonDocument _doc;
     bool _ready = false;
 };

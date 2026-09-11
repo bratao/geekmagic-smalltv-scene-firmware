@@ -1,219 +1,129 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-/*
- * GeekMagic Open Firmware
- * Copyright (C) 2026 Times-Z
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>.
- */
-
+// Derived from Times-Z GeekMagic Open Firmware. Configuration and credential persistence.
 #include <ArduinoJson.h>
 #include <LittleFS.h>
-
 #include <Logger.h>
+#include <cstring>
 #include "config/ConfigManager.h"
-#include "config/SecureStorage.h"
 
 ConfigManager::ConfigManager(const char* filename) : filename(filename), secure() {}
 
-/**
- * @brief Loads the configuration from a file stored in SPIFFS
- *
- * @return true if the configuration was successfully loaded and parsed false otherwise
- */
-auto ConfigManager::load() -> bool {
-    if (!LittleFS.begin()) {
-        Logger::error("Failed to mount LittleFS", "ConfigManager");
-        return false;
+bool ConfigManager::validWiFi(const char* name, const char* pass) {
+    if (!name || !pass) return false;
+    const size_t n = strlen(name), p = strlen(pass);
+    if (!n || n > 32 || (p && (p < 8 || p > 64))) return false;
+    for (size_t i=0;i<n;++i) if (uint8_t(name[i])<32 || uint8_t(name[i])==127) return false;
+    for (size_t i=0;i<p;++i) {
+        const auto c=uint8_t(pass[i]);
+        if (c<32 || c==127) return false;
+        if (p==64 && !((c>='0'&&c<='9')||(c>='a'&&c<='f')||(c>='A'&&c<='F'))) return false;
     }
-
-    File file = LittleFS.open(filename.c_str(), "r");
-    if (!file) {
-        Logger::error("Failed to open config file", "ConfigManager");
-        return false;
-    }
-
-    size_t size = file.size();
-    if (size == 0) {
-        Logger::warn("Config file is empty", "ConfigManager");
-        file.close();
-        return false;
-    }
-
-    std::unique_ptr<char[]> buf(new char[size + 1]);
-    file.readBytes(buf.get(), size);
-    buf[size] = '\0';
-    file.close();
-
-    JsonDocument doc;
-    DeserializationError error = deserializeJson(doc, buf.get());
-    if (error) {
-        Logger::error(("Failed to parse config file : " + String(error.c_str())).c_str(), "ConfigManager");
-        return false;
-    }
-
-    String ssid = doc["wifi_ssid"] | "";
-    String password = doc["wifi_password"] | "";
-    String api_token = doc["api_token"] | "";
-    String ntp_server_cfg = doc["ntp_server"] | "";
-
-    this->lcd_rotation = doc["lcd_rotation"] | lcd_rotation;
-
-    String nvs_ssid = secure.get("wifi_ssid", "");
-    String nvs_password = secure.get("wifi_password", "");
-    String nvs_api_token = secure.get("api_token", "");
-
-    if ((ssid.length() != 0 && nvs_ssid.length() == 0) || (password.length() != 0 && nvs_password.length() == 0)) {
-        secure.put("wifi_ssid", ssid.c_str());
-        secure.put("wifi_password", password.c_str());
-
-        this->ssid = secure.get("wifi_ssid").c_str();
-        this->password = secure.get("wifi_password").c_str();
-
-        if (ntp_server_cfg.length() != 0) {
-            this->ntp_server = ntp_server_cfg.c_str();
-        }
-
-        // Ensure we delete the wifi credentials from the json config after migrating
-        ConfigManager::save();
-
-        Logger::info("WiFi credentials migrated to SecureStorage", "ConfigManager");
-    } else {
-        this->ssid = secure.get("wifi_ssid").c_str();
-        this->password = secure.get("wifi_password").c_str();
-    }
-
-    if (api_token.length() != 0 && nvs_api_token.length() == 0) {
-        secure.put("api_token", api_token.c_str());
-        this->api_token = secure.get("api_token").c_str();
-
-        // Ensure we delete the api token from the json config after migrating
-        ConfigManager::save();
-
-        Logger::info("API token migrated to SecureStorage", "ConfigManager");
-    } else {
-        this->api_token = secure.get("api_token").c_str();
-    }
-
     return true;
 }
 
-/**
- * @brief Retrieves the current Wi-Fi SSID
- *
- * @return The SSID as a c style string
- */
-auto ConfigManager::getSSID() const -> const char* { return ssid.c_str(); }
-
-/**
- * @brief Retrieves the current Wi-Fi password
- *
- * @return The password as a c style string
- */
-auto ConfigManager::getPassword() const -> const char* { return password.c_str(); }
-
-/**
- * @brief Retrieves the current API token
- *
- * @return The API token as a c style string
- */
-auto ConfigManager::getApiToken() const -> const char* { return api_token.c_str(); }
-
-/**
- * @brief Retrieves the LCD rotation setting
- *
- * @return The rotation of the LCD
- */
-auto ConfigManager::getLCDRotation() const -> uint8_t { return lcd_rotation; }
-
-/**
- * @brief Set LCD rotation in memory
- *
- * @param newRotation Rotation value in range [0, 7]
- *
- * @return void
- */
-auto ConfigManager::setLCDRotation(uint8_t newRotation) -> void { lcd_rotation = newRotation; }
-
-/**
- * @brief Set WiFi credentials in memory
- * @param newSsid The SSID
- * @param newPassword The password
- *
- * @return void
- */
-auto ConfigManager::setWiFi(const char* newSsid, const char* newPassword) -> void {
-    if (newSsid != nullptr) {
-        ssid = newSsid;
+bool ConfigManager::setNetworks(const WifiNetwork* values, size_t count) {
+    if (count>MAX_WIFI_NETWORKS || (count && !values)) return false;
+    for (size_t i=0;i<count;++i) {
+        if (!validWiFi(values[i].ssid.c_str(),values[i].password.c_str())) return false;
+        for (size_t j=0;j<i;++j) if (values[i].ssid==values[j].ssid) return false;
     }
-    if (newPassword != nullptr) {
-        password = newPassword;
-    }
-}
-/**
- * @brief Set WiFi credentials in memory
- * @param newSsid The SSID
- * @param newPassword The password
- *
- * @return void
- */
-auto ConfigManager::setApiToken(const char* newApiToken) -> void {
-    if (newApiToken != nullptr) {
-        api_token = newApiToken;
-    }
+    std::array<WifiNetwork,MAX_WIFI_NETWORKS> candidate;
+    for (size_t i=0;i<count;++i) candidate[i]=values[i];
+    networks=std::move(candidate); networkCount=count;
+    ssid=count?networks[0].ssid:"";
+    password=count?networks[0].password:"";
+    return true;
 }
 
-/**
- * @brief Save the current configuration to the file
- *
- * @param clearWifiCreds If true wifi credentials will be cleared from json config
- *
- * @return true if the configuration was successfully saved false otherwise
- */
-auto ConfigManager::save() -> bool {
-    if (!LittleFS.begin()) {
-        Logger::error("Failed to mount LittleFS", "ConfigManager");
-
-        return false;
-    }
-
-    File file = LittleFS.open(filename.c_str(), "w");
-
-    if (!file) {
-        Logger::error("Failed to open config file for writing", "ConfigManager");
-
-        return false;
-    }
-
+bool ConfigManager::load() {
+    // Load persistent credentials even if the optional display configuration is missing.
     JsonDocument doc;
-
-    secure.put("wifi_ssid", this->getSSID());
-    secure.put("wifi_password", this->getPassword());
-
-    doc["lcd_rotation"] = lcd_rotation;
-    if (!this->ntp_server.empty()) {
-        doc["ntp_server"] = this->ntp_server.c_str();
+    if (LittleFS.begin()) {
+        File file=LittleFS.open(filename.c_str(),"r");
+        if (file && file.size() && file.size()<=4096) {
+            if (deserializeJson(doc,file)) { doc.clear(); Logger::warn("Invalid display configuration", "ConfigManager"); }
+        }
     }
-
-    if (serializeJson(doc, file) == 0) {
-        Logger::error("Failed to write config file", "ConfigManager");
-        file.close();
-
-        return false;
+    lcd_rotation=doc["lcd_rotation"] | lcd_rotation;
+    ntp_server=doc["ntp_server"] | "";
+    api_token=secure.get("api_token", "").c_str();
+    bool migrate=false;
+    if (api_token.empty() && doc["api_token"].is<const char*>()) {
+        api_token=doc["api_token"].as<const char*>(); migrate=!api_token.empty();
     }
+    const JsonVariantConst stored=secure.getValue("wifi_networks");
+    if (!stored.isNull()) {
+        if (!stored.is<JsonArrayConst>() || stored.size()>MAX_WIFI_NETWORKS) return false;
+        std::array<WifiNetwork,MAX_WIFI_NETWORKS> values;
+        size_t count=0;
+        for (JsonVariantConst item:stored.as<JsonArrayConst>()) {
+            if (!item["ssid"].is<const char*>() || !item["password"].is<const char*>()) return false;
+            const JsonString n=item["ssid"].as<JsonString>(), p=item["password"].as<JsonString>();
+            if (n.size()!=strlen(n.c_str()) || p.size()!=strlen(p.c_str())) return false;
+            values[count++]={n.c_str(),p.c_str()};
+        }
+        if (!setNetworks(values.data(),count)) return false;
+    } else {
+        String name=secure.get("wifi_ssid", ""), pass=secure.get("wifi_password", "");
+        if (name.isEmpty()) { name=doc["wifi_ssid"] | ""; pass=doc["wifi_password"] | ""; }
+        if (!name.isEmpty()) {
+            const WifiNetwork value{name.c_str(),pass.c_str()};
+            if (!setNetworks(&value,1)) return false;
+            migrate=true;
+        }
+    }
+    // Migrate only after all fields are loaded, preserving the existing token and network.
+    if (migrate && !save()) { Logger::error("Credential migration could not be saved", "ConfigManager"); return false; }
+    return true;
+}
 
+const char* ConfigManager::getSSID() const { return ssid.c_str(); }
+const char* ConfigManager::getPassword() const { return password.c_str(); }
+const char* ConfigManager::getApiToken() const { return api_token.c_str(); }
+uint8_t ConfigManager::getLCDRotation() const { return lcd_rotation; }
+void ConfigManager::setLCDRotation(uint8_t value) { lcd_rotation=value; }
+void ConfigManager::setApiToken(const char* value) { if (value) api_token=value; }
+void ConfigManager::setWiFi(const char* name,const char* pass) {
+    if (!name || !pass) return;
+    auto values=networks;
+    size_t count=networkCount,index=count;
+    for (size_t i=0;i<count;++i) if (values[i].ssid==name) { index=i;break; }
+    if (index>=MAX_WIFI_NETWORKS) return;
+    values[index]={name,pass};
+    if (index==count) ++count;
+    setNetworks(values.data(),count);
+}
+
+bool ConfigManager::save() {
+    if (!LittleFS.begin()) return false;
+    JsonDocument metadata;
+    metadata["lcd_rotation"]=lcd_rotation;
+    if (!ntp_server.empty()) metadata["ntp_server"]=ntp_server.c_str();
+    const String temporary=String(filename.c_str())+".tmp";
+    File file=LittleFS.open(temporary,"w");
+    if (!file) return false;
+    const size_t expected=measureJson(metadata);
+    const size_t written=serializeJson(metadata,file);
     file.close();
-    Logger::info("Configuration saved", "ConfigManager");
-
+    if (metadata.overflowed() || written!=expected) { LittleFS.remove(temporary); return false; }
+    JsonDocument changes;
+    // Keep the legacy first-network keys for firmware rollback compatibility.
+    changes["wifi_ssid"]=getSSID();
+    changes["wifi_password"]=getPassword();
+    changes["api_token"]=getApiToken();
+    JsonArray list=changes["wifi_networks"].to<JsonArray>();
+    for (size_t i=0;i<networkCount;++i) {
+        JsonObject item=list.add<JsonObject>();
+        item["ssid"]=networks[i].ssid.c_str(); item["password"]=networks[i].password.c_str();
+    }
+    if (changes.overflowed() || !secure.update(changes.as<JsonObjectConst>())) {
+        LittleFS.remove(temporary); return false;
+    }
+    // Credentials are already durable. Failure here affects only display metadata;
+    // keep the old file and report the warning without falsely rolling back credentials in RAM.
+    if (!LittleFS.rename(temporary,filename.c_str())) {
+        Logger::warn("Credentials saved; display metadata rename failed", "ConfigManager");
+        LittleFS.remove(temporary);
+    }
     return true;
 }

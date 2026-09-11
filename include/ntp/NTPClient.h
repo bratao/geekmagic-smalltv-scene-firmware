@@ -27,6 +27,7 @@ class NTPClient {
     NTPClient();
     void begin(uint32_t syncIntervalSeconds = 6 * 3600, uint8_t maxRetries = 3);
     void loop();
+    // True means accepted/already in progress; completion is reported by status getters.
     bool syncNow();
 
     bool lastSyncOk() const;
@@ -39,8 +40,14 @@ class NTPClient {
     time_t _lastSync = 0;
     bool _lastOk = false;
     String _lastStatus = "never synced";
-    unsigned long _nextSyncAttemptMs = 0;
+    enum class Phase : uint8_t { Idle, Active, Backoff };
+    Phase _phase = Phase::Idle;
+    uint32_t _since = 0, _waitMs = 0, _syncGeneration = 0;
+    uint8_t _attempt = 0;
+    String _server;
     void performSync();
+    void finish(bool success);
+
 };
 
 #endif  // NTP_CLIENT_H

@@ -25,6 +25,9 @@
 #include <string>
 #include <cstdint>
 #include <SPI.h>
+#include <array>
+
+struct WifiNetwork { std::string ssid; std::string password; };
 
 // LCD configuration defaults for hellocubic lite
 static constexpr int16_t LCD_W = 240;
@@ -44,6 +47,11 @@ class ConfigManager {
     ConfigManager(const char* filename = "/config.json");
     bool load();
     bool save();
+    static constexpr size_t MAX_WIFI_NETWORKS = 3;
+    size_t getNetworkCount() const { return networkCount; }
+    const WifiNetwork& getNetwork(size_t index) const { return networks[index < MAX_WIFI_NETWORKS ? index : 0]; }
+    bool setNetworks(const WifiNetwork* values, size_t count);
+    static bool validWiFi(const char* ssid, const char* password);
     void setWiFi(const char* newSsid, const char* newPassword);
     const char* getSSID() const;
     const char* getPassword() const;
@@ -62,6 +70,8 @@ class ConfigManager {
     SecureStorage secure;
     uint8_t lcd_rotation = 4;
     std::string ntp_server;
+    std::array<WifiNetwork, MAX_WIFI_NETWORKS> networks;
+    size_t networkCount = 0;
 
     const char* getNtpServer() const { return ntp_server.c_str(); }
     void setNtpServer(const char* s) {

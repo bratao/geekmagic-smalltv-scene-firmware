@@ -18,6 +18,7 @@
  */
 
 #include <SPI.h>
+#include <ESP8266WiFi.h>
 #include <Logger.h>
 #include <array>
 #include <algorithm>
@@ -30,6 +31,7 @@
 #include "display/SceneRenderer.h"
 
 static Gif* g_gif = nullptr;
+bool DisplayManager::hasActiveContent() { return g_gif != nullptr || SceneRenderer::active(); }
 
 extern ConfigManager configManager;
 
@@ -569,37 +571,21 @@ auto DisplayManager::setRotation(uint8_t rotation, String currentIP) -> void {
  * @return void
  */
 auto DisplayManager::drawStartup(String currentIP) -> void {
-    int constexpr rgbDelayMs = 1000;
-
-    g_lcd.fillScreen(LCD_RED);
-    delay(rgbDelayMs);
-    g_lcd.fillScreen(LCD_GREEN);
-    delay(rgbDelayMs);
-    g_lcd.fillScreen(LCD_BLUE);
-    delay(rgbDelayMs);
-
+    // Startup/status only; active scenes bypass this path in main.cpp.
+    // Avoid the old three-second RGB test on every address change.
     g_lcd.fillScreen(LCD_BLACK);
-
-    int constexpr titleY = 10;
-    int constexpr fontSize = 2;
-
-    DisplayManager::drawTextWrapped(DISPLAY_PADDING, titleY, "GeekMagic Open Firmware", fontSize, LCD_WHITE, LCD_BLACK,
-                                    false);
-    DisplayManager::drawTextWrapped(DISPLAY_PADDING, titleY + THREE_LINES_SPACE, String(PROJECT_VER_STR), fontSize,
+    DisplayManager::drawTextWrapped(10, 10, "SmallTV", 3, LCD_WHITE, LCD_BLACK, false);
+    DisplayManager::drawTextWrapped(10, 46, String(PROJECT_VER_STR), 1, LCD_WHITE, LCD_BLACK, false);
+    const bool connected=WiFi.status()==WL_CONNECTED;
+    const bool accessPoint=(WiFi.getMode() & WIFI_AP)!=0;
+    const String network=connected?WiFi.SSID():(accessPoint?WiFi.softAPSSID():String());
+    DisplayManager::drawTextWrapped(10, 78, connected?"Connected Wi-Fi":(accessPoint?"Wi-Fi access point":"Wi-Fi"), 1,
                                     LCD_WHITE, LCD_BLACK, false);
-    DisplayManager::drawTextWrapped(DISPLAY_PADDING, (titleY + THREE_LINES_SPACE + TWO_LINES_SPACE), "IP: " + currentIP,
-                                    fontSize, LCD_WHITE, LCD_BLACK, false);
-
-    const int16_t box = 40;
-    const int16_t gap = 20;
-    const int16_t boxY = titleY + (THREE_LINES_SPACE * 2) + ONE_LINE_SPACE;
-
-    g_lcd.fillRect(DISPLAY_PADDING, boxY, box, box, LCD_RED);
-    g_lcd.fillRect((int16_t)(DISPLAY_PADDING + box + gap), boxY, box, box, LCD_GREEN);
-    g_lcd.fillRect((int16_t)(DISPLAY_PADDING + (box + gap) * 2), boxY, box, box, LCD_BLUE);
-
+    DisplayManager::drawTextWrapped(10, 96, network.length()?network:String("Connecting..."), 2,
+                                    LCD_WHITE, LCD_BLACK, false);
+    DisplayManager::drawTextWrapped(10, 170, "IP address", 1, LCD_WHITE, LCD_BLACK, false);
+    DisplayManager::drawTextWrapped(10, 188, currentIP, 2, LCD_WHITE, LCD_BLACK, false);
     yield();
-
     Logger::info("Startup screen drawn", "DisplayManager");
 }
 

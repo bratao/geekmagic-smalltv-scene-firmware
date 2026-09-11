@@ -25,24 +25,34 @@
 #include <ArduinoJson.h>
 
 class WiFiManager {
-   public:
-    WiFiManager(const char* staSsid, const char* staPass, const char* apSsid, const char* apPass);
+ public:
+    WiFiManager(const char* apSsid, const char* apPass);
     void begin();
-    bool startStationMode();
+    void update();
+    bool connecting() const;
+    bool scheduleConnect(const char* ssid, const char* pass);
     bool startAccessPointMode();
     bool isApMode() const;
     IPAddress getIP() const;
-    static void scanNetworks(JsonArray& out);
-    bool connectToNetwork(const char* ssid, const char* pass, uint32_t timeoutMs = 10000);
     static bool isConnected();
     static String getConnectedSSID();
+    // -1: scanning, -2: unavailable/failed/busy, 0..20: result count.
+    // pollScan consumes completed SDK results once, then immediately frees them.
+    static int startScan();
+    static int pollScan(JsonArray& out);
 
-   private:
-    const char* _staSsid;
-    const char* _staPass;
+ private:
+    enum class Phase : uint8_t { Idle, Deferred, Attempt, Connected, DisconnectGrace, Recovery };
+    void nextProfile(uint32_t now);
+    void startAttempt(const char* ssid, const char* pass, uint32_t now);
+    void connected(uint32_t now);
+    void recover(uint32_t now);
     const char* _apSsid;
     const char* _apPass;
+    String _pendingSsid, _pendingPass, _attemptSsid, _skipSsid;
+    Phase _phase = Phase::Idle;
+    size_t _profileIndex = 0;
+    uint32_t _since = 0, _connectedSince = 0;
     bool _apMode = false;
 };
-
-#endif  // WIFI_MANAGER_H
+#endif

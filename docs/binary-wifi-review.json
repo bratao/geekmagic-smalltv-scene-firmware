@@ -1,0 +1,90 @@
+{
+  "passed": true,
+  "bytes": 567664,
+  "sha256": "493cc76fa28e72ffde3b554fb25a7c726104ca6fa3aed52b48a4407c1b9dfacb",
+  "elf_sha256": "dbbb9dac6fdabc0b58fc64d5c1b2b5cce9c82d31ff82c0acb3c8877f806c82dc",
+  "crc": "0xdd588565",
+  "flash_mode": "DIO",
+  "flash_size": "4MB",
+  "flash_frequency": "40MHz",
+  "sketch_limit": 1044464,
+  "images": [
+    {
+      "offset": 0,
+      "entry": "0x4010f480",
+      "checksum": "0x2b",
+      "segments": [
+        {
+          "address": "0x4010f000",
+          "bytes": 3424
+        },
+        {
+          "address": "0x3fff20b8",
+          "bytes": 40
+        }
+      ]
+    },
+    {
+      "offset": 4096,
+      "entry": "0x401000c0",
+      "checksum": "0x62",
+      "segments": [
+        {
+          "address": "0x40201010",
+          "bytes": 523384
+        },
+        {
+          "address": "0x40100000",
+          "bytes": 258
+        },
+        {
+          "address": "0x40100104",
+          "bytes": 27909
+        },
+        {
+          "address": "0x3ffe8000",
+          "bytes": 1640
+        },
+        {
+          "address": "0x3ffe86a0",
+          "bytes": 10320
+        }
+      ]
+    }
+  ],
+  "flash_tables": {
+    "Y2I16": {
+      "address": "0x4027cc66",
+      "bytes": 512
+    },
+    "CR2R16": {
+      "address": "0x4027ca66",
+      "bytes": 512
+    },
+    "CR2G16": {
+      "address": "0x4027c866",
+      "bytes": 512
+    },
+    "CB2G16": {
+      "address": "0x4027c666",
+      "bytes": 512
+    },
+    "CB2B16": {
+      "address": "0x4027c466",
+      "bytes": 512
+    },
+    "CLIPRBE": {
+      "address": "0x4027bee4",
+      "bytes": 1410
+    },
+    "CLIPGBE": {
+      "address": "0x4027ba2a",
+      "bytes": 1210
+    },
+    "CLIPBBE": {
+      "address": "0x4027b3d2",
+      "bytes": 1624
+    }
+  },
+  "limitations": "Structural integrity only; device OTA space, heap, SPI and Wi-Fi require live verification."
+}

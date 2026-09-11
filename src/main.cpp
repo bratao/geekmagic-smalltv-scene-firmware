@@ -30,6 +30,7 @@
 #include "display/DisplayManager.h"
 #include "web/Webserver.h"
 #include "web/Api.h"
+#include "web/EmbeddedWeb.h"
 #include "ntp/NTPClient.h"
 #include "boot/RescueMode.h"
 #if SMALLTV_ENABLE_METRICS
@@ -149,7 +150,7 @@ void setup() {
     DisplayManager::drawLoadingBar((float)step / TOTAL_STEPS, LOADING_BAR_Y);
     step++;
 
-    wifiManager = new WiFiManager(configManager.getSSID(), configManager.getPassword(), AP_SSID, AP_PASSWORD);
+    wifiManager = new WiFiManager(AP_SSID, AP_PASSWORD);
     wifiManager->begin();
 
     ntpClient = new NTPClient();
@@ -167,6 +168,7 @@ void setup() {
     DisplayManager::drawLoadingBar((float)step / TOTAL_STEPS, LOADING_BAR_Y);
 
     registerApiEndpoints(webserver);
+    registerEmbeddedWeb(webserver);
 
     if (!littleFsReadyForStatic) {
         httpUpdater.setup(&webserver->raw(), "/legacyupdate");
@@ -181,7 +183,7 @@ void setup() {
 
     delay(LOADING_DELAY_MS);
 
-    DisplayManager::drawStartup(wifiManager->getIP().toString());
+    DisplayManager::drawStartup(wifiManager->connecting()?String("Connecting WiFi..."):wifiManager->getIP().toString());
 
 #if SMALLTV_ENABLE_METRICS
     if (METRICS_ENDPOINT[0] != '\0' && WiFiManager::isConnected() && !wifiManager->isApMode()) {
@@ -208,6 +210,16 @@ void loop() {
 
     if (webserver != nullptr) {
         webserver->handleClient();
+    }
+
+    if (wifiManager != nullptr) {
+        wifiManager->update();
+        static uint32_t lastAddress=0;
+        const uint32_t address=uint32_t(wifiManager->getIP());
+        if (address && address!=lastAddress) {
+            lastAddress=address;
+            if (!DisplayManager::hasActiveContent()) DisplayManager::drawStartup(wifiManager->getIP().toString());
+        }
     }
 
     if (ntpClient != nullptr) {

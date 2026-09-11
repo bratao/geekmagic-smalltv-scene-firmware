@@ -18,12 +18,12 @@
 
       <a href="./index.html" class="wifi-back-link">← Back to Home</a>
 
-      <section x-data="tokenHandler()" x-init="init()">
+      <section x-data="tokenHandler()">
         <h2>Bearer Token</h2>
 
         <p>
-          This token is stored locally in your browser (localStorage key:
-          <strong>Authorization</strong>).
+          The current token loads automatically from this TV and stays masked.
+          You can copy it for API clients or explicitly change it below.
         </p>
 
         <label for="bearer-token">Token</label>
@@ -34,7 +34,7 @@
             name="bearer-token"
             :type="showToken ? 'text' : 'password'"
             autocomplete="off"
-            placeholder="Paste token here"
+            placeholder="Loading from the TV…"
           />
           <button
             type="button"

@@ -45,6 +45,7 @@ class DisplayManager {
                                uint16_t fgColor = 0x07E0, uint16_t bgColor = 0x39E7);
     static bool playGifFullScreen(const String& path, uint32_t timeMs = 0, bool keepScreen = false);
     static bool stopGif(bool keepScreen = false);
+    static bool hasActiveContent();
     static void update();
     static void clearScreen();
 };

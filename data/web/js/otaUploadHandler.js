@@ -28,6 +28,17 @@ function otaUploadHandler() {
       this.progress = 0;
       this.etaText = "";
 
+      let token;
+      try {
+        // Refresh before a non-replayable upload; never retry a firmware body automatically.
+        token = await loadWebToken(true);
+      } catch (_) {
+        this.uploading = false;
+        this.uploadMessage = "Could not load device authorization. Retry when the TV is reachable.";
+        return;
+      }
+      if (!this.uploading) return; // Cancelled while authorization was loading.
+
       const formData = new FormData();
       formData.append("file", file);
 
@@ -83,10 +94,7 @@ function otaUploadHandler() {
       };
 
       this.xhr.open("POST", endpoint);
-      const token = localStorage.getItem("Authorization");
-      if (token) {
-        this.xhr.setRequestHeader("Authorization", `Bearer ${token}`);
-      }
+      this.xhr.setRequestHeader("Authorization", `Bearer ${token}`);
       this.xhr.send(formData);
     },
 

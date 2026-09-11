@@ -23,6 +23,9 @@
 #include <ESP8266WiFi.h>
 #include <user_interface.h>
 #include <BearSSLHelpers.h>
+#include <memory>
+#include <new>
+#include <utility>
 
 #include "config/SecureStorage.h"
 
@@ -75,10 +78,18 @@ auto SecureStorage::begin() -> bool {
     EEPROM.begin(static_cast<int>(_eepromSize));
 
     if (!loadToMemory()) {
+        bool blank = true;
+        for (size_t i = 0; i < _eepromSize; ++i) {
+            if (EEPROM.read(static_cast<int>(i)) != 0xff) { blank = false; break; }
+        }
+        if (!blank) {
+            Logger::error("Stored NVS could not be read; preserving EEPROM", "SecureStorage");
+            return false;
+        }
         Logger::warn("No existing NVS data found, initializing new storage", "SecureStorage");
         _doc.clear();
 
-        if (!flushToEEPROM()) {
+        if (!flushToEEPROM(_doc)) {
             Logger::error("Failed to initialize NVS in EEPROM", "SecureStorage");
             _ready = false;
 
@@ -130,7 +141,9 @@ auto const SecureStorage::loadToMemory() -> bool {
         return false;
     }
 
-    char* buf = new char[len + 1];
+    std::unique_ptr<char[]> storage(new (std::nothrow) char[len + 1]);
+    if (!storage) return false;
+    char* buf = storage.get();
     for (uint16_t i = 0; i < len; ++i) {
         buf[i] = static_cast<char>(EEPROM.read(static_cast<int>(headerSize + i)));
     }
@@ -144,18 +157,14 @@ auto const SecureStorage::loadToMemory() -> bool {
         buf[i] ^= key[static_cast<size_t>(i) % KEY_LEN];
     }
 
-    DeserializationError err = deserializeJson(_doc, buf);
+    DeserializationError err = deserializeJson(_doc, static_cast<const char*>(buf), len);
 
     if (err) {
         Logger::warn(String("Failed to parse NVS JSON: " + String(err.c_str())).c_str(), "SecureStorage");
         _doc.clear();
 
-        delete[] buf;
-
         return false;
     }
-
-    delete[] buf;
 
     Logger::info("NVS data loaded from EEPROM", "SecureStorage");
 
@@ -167,15 +176,18 @@ auto const SecureStorage::loadToMemory() -> bool {
  *
  * @return true on success false on failure
  */
-auto const SecureStorage::flushToEEPROM() -> bool {
+auto SecureStorage::flushToEEPROM(const JsonDocument& document) -> bool {
     const size_t headerSize = 6;
     size_t payloadMax = _eepromSize - headerSize;
 
+    if (document.overflowed()) return false;
+    const size_t expected = measureJson(document);
+    if (!expected || expected > payloadMax) return false;
     String out;
-    out.reserve(static_cast<int>(payloadMax));
-    size_t written = serializeJson(_doc, out);
+    if (!out.reserve(expected)) return false;
+    size_t written = serializeJson(document, out);
 
-    if (written == 0 || written > payloadMax) {
+    if (written != expected || written > payloadMax) {
         Logger::error("Serialized NVS too large for EEPROM", "SecureStorage");
 
         return false;
@@ -223,9 +235,10 @@ auto SecureStorage::put(const char* key, const char* value) -> bool {
         };
     }
 
-    _doc[key] = value;
-
-    return flushToEEPROM();
+    JsonDocument changes;
+    changes[key] = value;
+    if (changes.overflowed()) return false;
+    return update(changes.as<JsonObjectConst>());
 }
 
 /**
@@ -242,9 +255,23 @@ auto SecureStorage::remove(const char* key) -> bool {
         }
     }
 
-    _doc.remove(key);
+    JsonDocument candidate(_doc);
+    if (candidate.overflowed()) return false;
+    candidate.remove(key);
+    if (!flushToEEPROM(candidate)) return false;
+    _doc = std::move(candidate);
+    return true;
+}
 
-    return flushToEEPROM();
+bool SecureStorage::update(JsonObjectConst changes) {
+    if (!_ready && !begin()) return false;
+    JsonDocument candidate(_doc);
+    for (JsonPairConst item : changes) candidate[item.key().c_str()].set(item.value());
+    if (candidate.overflowed()) return false;
+    if (candidate.as<JsonVariantConst>() == _doc.as<JsonVariantConst>()) return true;
+    if (!flushToEEPROM(candidate)) return false;
+    _doc = std::move(candidate);
+    return true;
 }
 
 /**

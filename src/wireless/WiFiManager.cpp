@@ -17,158 +17,169 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-#include <ArduinoJson.h>
-#include <Logger.h>
-
 #include "wireless/WiFiManager.h"
-#include "display/DisplayManager.h"
+#include "config/ConfigManager.h"
+#include <Logger.h>
+#include <cstring>
+#include <utility>
 
-static constexpr int LOADING_BAR_TEXT_X = 20;
-static constexpr int LOADING_BAR_TEXT_Y = 60;
-static constexpr int LOADING_BAR_Y = 110;
-static constexpr int LOADING_DELAY_MS = 1000;
+extern ConfigManager configManager;
 
-/**
- * @brief Maximum number of attempts to connect to a wifi network
- */
-static constexpr int MAX_CONNECTION_ATTEMPTS = 20;
+namespace {
+constexpr uint32_t DeferredMs=500, AttemptMs=12000, DisconnectMs=5000;
+constexpr uint32_t RetryMs=60000, ApGraceMs=10000;
+constexpr int MaxScanResults=20;
+bool scanPending=false;
+uint32_t scanStarted=0;
+bool connectionAttempt=false;
 
-/**
- * @brief Delay in milliseconds between wifi connection attempts
- */
-static constexpr uint32_t CONNECTION_DELAY_MS = 500;
-
-/**
- * @brief WifiManager constructor
- *
- * @param staSsid The SSID for the WiFi station mode
- * @param staPass The password for the WiFi station mode
- * @param apSsid The SSID for the WiFi access point mode
- * @param apPass The password for the WiFi access point mode
- */
-WiFiManager::WiFiManager(const char* staSsid, const char* staPass, const char* apSsid, const char* apPass)
-    : _staSsid(staSsid), _staPass(staPass), _apSsid(apSsid), _apPass(apPass) {}
-
-auto WiFiManager::begin() -> void {
-    if (!startStationMode()) {
-        startAccessPointMode();
+void expireScan() {
+    // Abandoned browser polling must not hold scan memory or prevent roaming forever.
+    if (scanPending && uint32_t(millis()-scanStarted)>=30000 && WiFi.scanComplete()!=WIFI_SCAN_RUNNING) {
+        WiFi.scanDelete();scanPending=false;
     }
-
-    Logger::info("Wifi active", "WiFiManager");
-    Logger::info(String("Mode : " + String(_apMode ? "AP" : "STA")).c_str(), "WiFiManager");
-    Logger::info(String("SSID : " + String(_apMode ? _apSsid : _staSsid)).c_str(), "WiFiManager");
-    Logger::info(String("IP   : " + getIP().toString()).c_str(), "WiFiManager");
+}
 }
 
-/**
- * @brief Attempts to connect the device to a WiFi network in station mode
- *
- * @return true if the device successfully connects to the WiFi network false otherwise
- */
-auto WiFiManager::startStationMode() -> bool {
+WiFiManager::WiFiManager(const char* apSsid,const char* apPass)
+    : _apSsid(apSsid),_apPass(apPass) {}
+
+void WiFiManager::begin() {
+    WiFi.persistent(false);
+    WiFi.setAutoReconnect(false);
     WiFi.mode(WIFI_STA);
-    WiFi.begin(_staSsid, _staPass);
-    int attempts = 0;
-
-    Logger::info("Connecting to WiFi...", "WiFiManager");
-
-    while (WiFi.status() != WL_CONNECTED && attempts < MAX_CONNECTION_ATTEMPTS) {
-        delay(CONNECTION_DELAY_MS);
-        attempts++;
-    }
-
-    if (WiFi.status() == WL_CONNECTED) {
-        _apMode = false;
-        return true;
-    }
-
-    return false;
+    _profileIndex=0;
+    _skipSsid="";
+    nextProfile(millis());
 }
 
-void WiFiManager::scanNetworks(JsonArray& out) {
-    Logger::info("Scanning WiFi networks...", "WiFiManager");
-
-    int8_t networks = WiFi.scanNetworks();
-
-    Logger::info(String("Found networks: " + String(networks)).c_str(), "WiFiManager");
-
-    for (int i = 0; i < networks; ++i) {
-        JsonObject obj = out.add<JsonObject>();
-
-        auto rssiVal = static_cast<int>(WiFi.RSSI(i));
-
-        obj["ssid"] = WiFi.SSID(i);                             // NOLINT(readability-misplaced-array-index)
-        obj["rssi"] = rssiVal;                                  // NOLINT(readability-misplaced-array-index)
-        obj["enc"] = static_cast<int>(WiFi.encryptionType(i));  // NOLINT(readability-misplaced-array-index)
-    }
-}
-
-auto WiFiManager::connectToNetwork(const char* ssid, const char* pass, uint32_t timeoutMs) -> bool {
-    Logger::info(String("Connecting to " + String(ssid)).c_str(), "WiFiManager");
-
-    constexpr int total_steps = 2;
-    int step = 0;
-
-    DisplayManager::clearScreen();
-    DisplayManager::drawTextWrapped(LOADING_BAR_TEXT_X, LOADING_BAR_TEXT_Y, "Wifi connecting...", 2, LCD_WHITE,
-                                    LCD_BLACK, true);
-    DisplayManager::drawLoadingBar(static_cast<float>(step) / static_cast<float>(total_steps), LOADING_BAR_Y);
-
-    WiFi.mode(WIFI_STA);
-    WiFi.begin(ssid, pass);
-
-    uint32_t start = millis();
-
-    while (WiFi.status() != WL_CONNECTED && (millis() - start) < timeoutMs) {
-        delay(CONNECTION_DELAY_MS);
-        DisplayManager::drawLoadingBar(static_cast<float>(step) / static_cast<float>(total_steps), LOADING_BAR_Y);
-    }
-
-    step++;
-
-    if (WiFi.status() == WL_CONNECTED) {
-        _apMode = false;
-
-        Logger::info(String("Connected: " + WiFi.localIP().toString()).c_str(), "WiFiManager");
-        DisplayManager::drawTextWrapped(LOADING_BAR_TEXT_X, LOADING_BAR_TEXT_Y, "Connected !", 2, LCD_WHITE, LCD_BLACK,
-                                        true);
-        DisplayManager::drawTextWrapped(LOADING_BAR_TEXT_X, LOADING_BAR_TEXT_Y + ONE_LINE_SPACE,
-                                        "IP: " + WiFi.localIP().toString(), 2, LCD_WHITE, LCD_BLACK, true);
-
-        DisplayManager::drawLoadingBar(1.0F, LOADING_BAR_Y);
-
-        return true;
-    }
-
-    DisplayManager::drawTextWrapped(LOADING_BAR_TEXT_X, LOADING_BAR_TEXT_Y, "Failed to connect!", 2, LCD_WHITE,
-                                    LCD_BLACK, true);
-    Logger::warn("Failed to connect to WiFi", "WiFiManager");
-
-    DisplayManager::drawLoadingBar(1.0F, LOADING_BAR_Y);
-
-    startAccessPointMode();
-
-    return false;
-}
-
-auto WiFiManager::isConnected() -> bool { return WiFi.status() == WL_CONNECTED; }
-
-auto WiFiManager::getConnectedSSID() -> String { return WiFi.SSID(); }
-
-/**
- * @brief Starts the WiFi Access Point (AP) mode
- *
- * @return true Always returns true to indicate the AP mode was started
- */
-auto WiFiManager::startAccessPointMode() -> bool {
-    WiFi.mode(WIFI_AP);
-    WiFi.softAP(_apSsid, _apPass);
-
-    _apMode = true;
-
+bool WiFiManager::scheduleConnect(const char* ssid,const char* pass) {
+    expireScan();
+    if (scanPending) return false;
+    if (!ssid || !pass || strlen(ssid)==0 || strlen(ssid)>32 || strlen(pass)>64) return false;
+    // Copy before acknowledging: callers may supply temporary JSON/config strings.
+    String nextSsid(ssid),nextPass(pass);
+    if (nextSsid.length()!=strlen(ssid) || nextPass.length()!=strlen(pass)) return false;
+    _pendingSsid=std::move(nextSsid);_pendingPass=std::move(nextPass);
+    _phase=Phase::Deferred;_since=millis();connectionAttempt=true;
     return true;
 }
 
-auto WiFiManager::isApMode() const -> bool { return _apMode; }
+void WiFiManager::startAttempt(const char* ssid,const char* pass,uint32_t now) {
+    _attemptSsid=ssid;
+    // The ESP8266 SDK copies station credentials in begin; persistence remains off.
+    WiFi.mode(_apMode?WIFI_AP_STA:WIFI_STA);
+    WiFi.disconnect(false);
+    WiFi.begin(ssid,pass);
+    connectionAttempt=true;
+    _phase=Phase::Attempt;_since=now;
+    Logger::info("Trying configured WiFi profile", "WiFiManager");
+}
 
-auto WiFiManager::getIP() const -> IPAddress { return _apMode ? WiFi.softAPIP() : WiFi.localIP(); }
+void WiFiManager::nextProfile(uint32_t now) {
+    const size_t count=configManager.getNetworkCount();
+    while (_profileIndex<count && _profileIndex<ConfigManager::MAX_WIFI_NETWORKS) {
+        const auto& profile=configManager.getNetwork(_profileIndex++);
+        if (profile.ssid.empty() || (!_skipSsid.isEmpty() && _skipSsid==profile.ssid.c_str())) continue;
+        startAttempt(profile.ssid.c_str(),profile.password.c_str(),now);
+        return;
+    }
+    recover(now);
+}
+
+void WiFiManager::recover(uint32_t now) {
+    WiFi.disconnect(false);
+    connectionAttempt=false;
+    startAccessPointMode();
+    _attemptSsid="";_skipSsid="";
+    _phase=Phase::Recovery;_since=now;
+    Logger::info("WiFi recovery access point available", "WiFiManager");
+}
+
+void WiFiManager::connected(uint32_t now) {
+    connectionAttempt=false;
+    _pendingSsid="";_pendingPass="";_skipSsid="";
+    _phase=Phase::Connected;_connectedSince=now;
+    Logger::info("WiFi station connected", "WiFiManager");
+}
+
+void WiFiManager::update() {
+    expireScan();
+    const uint32_t now=millis();
+    switch (_phase) {
+    case Phase::Deferred:
+        // No radio mutation in the request handler; let the response leave first.
+        if (uint32_t(now-_since)<DeferredMs || scanPending) return;
+        _skipSsid=_pendingSsid;_profileIndex=0;
+        startAttempt(_pendingSsid.c_str(),_pendingPass.c_str(),now);
+        _pendingSsid="";_pendingPass="";
+        break;
+    case Phase::Attempt:
+        if (isConnected() && WiFi.SSID()==_attemptSsid) { connected(now);return; }
+        if (uint32_t(now-_since)>=AttemptMs) nextProfile(now);
+        break;
+    case Phase::Connected:
+        if (!isConnected()) { _phase=Phase::DisconnectGrace;_since=now;return; }
+        if (_apMode && !scanPending && uint32_t(now-_connectedSince)>=ApGraceMs) {
+            WiFi.softAPdisconnect(true);
+            WiFi.mode(WIFI_STA);
+            _apMode=false;
+        }
+        break;
+    case Phase::DisconnectGrace:
+        if (isConnected()) { connected(now);return; }
+        if (uint32_t(now-_since)>=DisconnectMs && !scanPending) {
+            _profileIndex=0;_skipSsid="";nextProfile(now);
+        }
+        break;
+    case Phase::Recovery:
+        if (isConnected()) { connected(now);return; }
+        if (uint32_t(now-_since)>=RetryMs && !scanPending) {
+            _profileIndex=0;_skipSsid="";nextProfile(now);
+        }
+        break;
+    case Phase::Idle: break;
+    }
+}
+
+bool WiFiManager::startAccessPointMode() {
+    WiFi.mode(WIFI_AP_STA);
+    if (!_apMode) _apMode=WiFi.softAP(_apSsid,_apPass);
+    return _apMode;
+}
+
+int WiFiManager::startScan() {
+    expireScan();
+    if (scanPending) return -1;
+    if (connectionAttempt) return -2;
+    WiFi.scanDelete();
+    const int result=WiFi.scanNetworks(true);
+    if (result==WIFI_SCAN_FAILED) return -2;
+    scanPending=true;scanStarted=millis();
+    return -1;
+}
+
+int WiFiManager::pollScan(JsonArray& out) {
+    out.clear();
+    if (!scanPending) return -2;
+    const int count=WiFi.scanComplete();
+    if (count==WIFI_SCAN_RUNNING) return -1;
+    scanPending=false;
+    if (count<0) { WiFi.scanDelete();return -2; }
+    const int bounded=count<MaxScanResults?count:MaxScanResults;
+    for (int i=0;i<bounded;++i) {
+        JsonObject item=out.add<JsonObject>();
+        item["ssid"]=WiFi.SSID(i);
+        item["rssi"]=WiFi.RSSI(i);
+        item["enc"]=static_cast<int>(WiFi.encryptionType(i));
+    }
+    WiFi.scanDelete();
+    return bounded;
+}
+
+bool WiFiManager::connecting() const { return _phase==Phase::Deferred || _phase==Phase::Attempt; }
+
+bool WiFiManager::isConnected() { return WiFi.status()==WL_CONNECTED; }
+String WiFiManager::getConnectedSSID() { return isConnected()?WiFi.SSID():String(); }
+bool WiFiManager::isApMode() const { return _apMode; }
+IPAddress WiFiManager::getIP() const { return isConnected()?WiFi.localIP():WiFi.softAPIP(); }

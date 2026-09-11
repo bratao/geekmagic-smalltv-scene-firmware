@@ -18,198 +18,96 @@
  */
 
 #include "ntp/NTPClient.h"
-#include <ctime>
-#include <array>
+#include "config/ConfigManager.h"
+#include "wireless/WiFiManager.h"
+#include <coredecls.h>
 #include <lwip/apps/sntp.h>
 #include <Logger.h>
-#include <wireless/WiFiManager.h>
-#include "config/ConfigManager.h"
+#include <ctime>
 
 extern ConfigManager configManager;
-
-static constexpr const char* TAG = "NTPClient";
-
-/**
- * @brief Default NTP server
- */
-static constexpr const char* DEFAULT_NTP_SERVER1 = "pool.ntp.org";
-
-/**
- * @brief miliseconds per second
- */
-static constexpr unsigned long MILLIS_PER_SECOND = 1000UL;
-
-/**
- * @brief Default NTP timeout in milliseconds
- */
-static constexpr unsigned long DEFAULT_NTP_TIMEOUT_MS = 10000UL;
-
-/**
- * @brief Poll delay in milliseconds
- */
-static constexpr unsigned long POLL_DELAY_MS = 200UL;
-
-/**
- * @brief Retry base delay in milliseconds
- */
-static constexpr unsigned long RETRY_BASE_DELAY_MS = 500UL;
-
-/**
- * @brief Reasonable epoch time to 2020/09/13
- */
-static constexpr time_t REASONABLE_EPOCH = 1600000000UL;
-
-/**
- * @brief Status buffer size
- */
-static constexpr size_t STATUS_BUFFER_SIZE = 64U;
-
-/**
- * @brief Year base for struct tm
- */
-static constexpr int TM_YEAR_BASE = 1900;
+namespace {
+constexpr uint32_t TimeoutMs=10000;
+constexpr time_t ReasonableEpoch=1600000000;
+constexpr const char* DefaultServer="pool.ntp.org";
+volatile uint32_t syncGeneration=0;
+}
 
 NTPClient::NTPClient() = default;
 
-/**
- * @brief Initialize the NTP client
- * @param syncIntervalSeconds Sync interval in seconds (default: 6 hours)
- * @param maxRetries Maximum number of retries on failure (default: 3)
- *
- * @return void
- */
-void NTPClient::begin(uint32_t syncIntervalSeconds, uint8_t maxRetries) {
-    _syncIntervalSeconds = syncIntervalSeconds;
-    _maxRetries = maxRetries;
-    _lastStatus = "not started";
-    _nextSyncAttemptMs = millis();
-
-    Logger::info("NTP client initialized", TAG);
+void NTPClient::begin(uint32_t intervalSeconds,uint8_t maxRetries) {
+    // Bounds keep all elapsed-millis intervals well below the wrap period.
+    _syncIntervalSeconds=intervalSeconds<60?60:(intervalSeconds>604800?604800:intervalSeconds);
+    _maxRetries=maxRetries<1?1:(maxRetries>3?3:maxRetries);
+    _phase=Phase::Idle;_since=millis();_waitMs=0;_attempt=0;
+    _lastStatus="not started";
+    settimeofday_cb([](bool fromSntp) {
+        // SDK invokes this from its scheduled callback, not the display/web handler.
+        if (fromSntp) ++syncGeneration;
+    });
+    Logger::info("Nonblocking NTP client initialized", "NTPClient");
 }
 
-/**
- * @brief Main loop to handle periodic NTP sync
- *
- * @return void
- */
+void NTPClient::performSync() {
+    sntp_stop();
+    const char* configured=configManager.getNtpServer();
+    _server=(configured && configured[0])?configured:DefaultServer;
+    _syncGeneration=syncGeneration;
+    ++_attempt;_phase=Phase::Active;_since=millis();_lastOk=false;
+    _lastStatus=String("sync requested (attempt ")+_attempt+")";
+    // UTC system time; renderer applies its own display timezone exactly once.
+    if (_server!=DefaultServer) configTime(0,0,_server.c_str(),DefaultServer);
+    else configTime(0,0,DefaultServer);
+}
+
+void NTPClient::finish(bool success) {
+    sntp_stop();
+    _phase=Phase::Idle;_since=millis();_waitMs=_syncIntervalSeconds*1000;
+    _lastOk=success;
+    if (success) {
+        _lastSync=time(nullptr);
+        _lastStatus="sync completed";
+        Logger::info("NTP synchronization completed", "NTPClient");
+    } else {
+        _lastStatus="sync failed after retries";
+        Logger::warn("NTP synchronization failed after retries", "NTPClient");
+    }
+}
+
 void NTPClient::loop() {
+    const uint32_t now=millis();
     if (!WiFiManager::isConnected()) {
-        _lastStatus = "network unavailable";
+        if (_phase!=Phase::Idle) {
+            sntp_stop();_phase=Phase::Idle;_lastOk=false;_waitMs=0;
+        }
+        // Resume promptly after profile failover rather than waiting the old six-hour interval.
+        _waitMs=0;
+        _lastStatus="network unavailable";
         return;
     }
-
-    unsigned long nowMs = millis();
-    if (nowMs >= _nextSyncAttemptMs) {
-        performSync();
-        _nextSyncAttemptMs = nowMs + (_syncIntervalSeconds * MILLIS_PER_SECOND);
+    if (_phase==Phase::Idle) {
+        if (uint32_t(now-_since)>=_waitMs) { _attempt=0;performSync(); }
+        return;
     }
-}
-
-/**
- * @brief Trigger an immediate NTP sync
- *
- * @return true if sync was successful false otherwise
- */
-auto NTPClient::syncNow() -> bool {
-    if (!WiFiManager::isConnected()) {
-        _lastStatus = "network unavailable";
-        _lastOk = false;
-
-        Logger::warn("Manual NTP sync requested but network is unavailable", TAG);
-
-        return false;
+    if (_phase==Phase::Backoff) {
+        if (uint32_t(now-_since)>=_waitMs) performSync();
+        return;
     }
-
-    performSync();
-
-    return _lastOk;
-}
-
-/**
- * @brief Perform the NTP synchronization
- *
- * @return void
- */
-void NTPClient::performSync() {
-    Logger::info("Starting NTP sync...", TAG);
-
-    int attempt = 0;
-    time_t now = 0;
-
-    while (attempt < _maxRetries) {
-        attempt++;
-        const char* srv = configManager.getNtpServer();
-        const char* server1 = (srv != nullptr && srv[0] != '\0') ? srv : DEFAULT_NTP_SERVER1;
-        const char* server2 = (srv != nullptr && srv[0] != '\0') ? DEFAULT_NTP_SERVER1 : nullptr;
-
-        if (server2 != nullptr) {
-            configTime(0, 0, server1, server2);
-        } else {
-            configTime(0, 0, server1);
-        }
-
-        unsigned long start = millis();
-        const unsigned long timeoutMs = DEFAULT_NTP_TIMEOUT_MS;
-
-        while ((millis() - start) < timeoutMs) {
-            now = time(nullptr);
-
-            if (now > REASONABLE_EPOCH) {
-                break;
-            }
-
-            delay(static_cast<unsigned long>(POLL_DELAY_MS));
-        }
-
-        if (now > REASONABLE_EPOCH) {
-            _lastSync = now;
-            _lastOk = true;
-            std::array<char, STATUS_BUFFER_SIZE> buf;
-            struct tm* tm_info = localtime(&now);
-
-            snprintf(buf.data(), buf.size(), "Synced: %04d-%02d-%02d %02d:%02d:%02d", tm_info->tm_year + TM_YEAR_BASE,
-                     tm_info->tm_mon + 1, tm_info->tm_mday, tm_info->tm_hour, tm_info->tm_min, tm_info->tm_sec);
-            _lastStatus = buf.data();
-
-            Logger::info(_lastStatus.c_str(), TAG);
-
-            sntp_stop();
-
-            return;
-        }
-
-        std::array<char, STATUS_BUFFER_SIZE> retryBuf;
-        snprintf(retryBuf.data(), retryBuf.size(), "NTP sync attempt %d failed", attempt);
-        Logger::warn(retryBuf.data(), TAG);
-
-        delay(static_cast<unsigned long>(RETRY_BASE_DELAY_MS) * static_cast<unsigned long>(attempt));
-    }
-
-    _lastOk = false;
-    _lastStatus = "sync failed";
-
+    // A merely valid pre-existing wall clock cannot complete this attempt.
+    if (syncGeneration!=_syncGeneration && time(nullptr)>ReasonableEpoch) { finish(true);return; }
+    if (uint32_t(now-_since)<TimeoutMs) return;
     sntp_stop();
-
-    Logger::error("NTP sync failed after retries", TAG);
+    if (_attempt>=_maxRetries) { finish(false);return; }
+    _phase=Phase::Backoff;_since=now;_waitMs=500u*_attempt;
+    _lastStatus="retry pending";
 }
 
-/**
- * @brief Check if the last sync was successful
- *
- * @return true if last sync was successful or false otherwise
- */
-auto NTPClient::lastSyncOk() const -> bool { return _lastOk; }
+bool NTPClient::syncNow() {
+    if (!WiFiManager::isConnected()) { _lastStatus="network unavailable";return false; }
+    if (_phase==Phase::Active || _phase==Phase::Backoff) return true;
+    _attempt=0;performSync();return true;
+}
 
-/**
- * @brief Get the time of the last successful sync
- *
- * @return time_t of the last sync
- */
-auto NTPClient::lastSyncTime() const -> time_t { return _lastSync; }
-
-/**
- * @brief Get the last sync status message
- *
- * @return String containing the last status
- */
-auto NTPClient::lastStatus() const -> String { return _lastStatus; }
+bool NTPClient::lastSyncOk() const { return _lastOk; }
+time_t NTPClient::lastSyncTime() const { return _lastSync; }
+String NTPClient::lastStatus() const { return _lastStatus; }
