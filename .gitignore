@@ -1,0 +1,10 @@
+.venv/
+.pio/
+__pycache__/
+*.pyc
+include/project_version.h
+.env
+data/config.json
+*.elf
+*.map
+*.log

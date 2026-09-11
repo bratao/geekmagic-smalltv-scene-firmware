@@ -1,0 +1,19 @@
+{
+  "mode": "scene",
+  "bg": "#000000",
+  "epoch": 1789140000,
+  "tz_offset": -10800,
+  "commands": [
+    {"type":"clock","x":10,"y":5,"font":"clock","color":"#ffffff","period_ms":4000,"min":64,"max":255},
+    {"type":"text","x":153,"y":8,"w":77,"font":"small","text":"sexta"},
+    {"type":"text","x":153,"y":29,"w":77,"font":"meta","text":"11/09","color":"#c5cbd3"},
+    {"type":"line","x0":10,"y0":50,"x1":229,"y1":50,"color":"#444444"},
+    {"type":"text","x":10,"y":55,"w":220,"font":"heading","text":"Reuniões","color":"#55eaff"},
+    {"type":"text","x":10,"y":79,"w":220,"font":"title","text":"Sem mais reuniões"},
+    {"type":"text","x":10,"y":106,"w":220,"font":"meta","text":"por hoje","color":"#c5cbd3"},
+    {"type":"line","x0":10,"y0":144,"x1":229,"y1":144,"color":"#444444"},
+    {"type":"text","x":10,"y":150,"w":220,"font":"heading","text":"Tarefas para hoje","color":"#55eaff"},
+    {"type":"text","x":10,"y":174,"w":220,"font":"title","text":"Testar a API"},
+    {"type":"text","x":10,"y":205,"w":220,"font":"meta","text":"Cena de demonstração","color":"#c5cbd3"}
+  ]
+}
