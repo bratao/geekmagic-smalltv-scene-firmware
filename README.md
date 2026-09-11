@@ -1,47 +1,47 @@
 # GeekMagic SmallTV Scene Firmware
 
-Firmware para **SmallTV-Ultra / ESP8266**, com **Drawing API**, cenas retidas, relógio e animação local, atualizações sem limpeza preta intermediária e otimização de RAM.
+Firmware for **SmallTV-Ultra / ESP8266**, featuring a **Drawing API**, retained scenes, a local clock and animation, updates without clearing the screen to black, and reduced RAM usage.
 
-Derivado de [Times-Z/GeekMagic-Open-Firmware](https://github.com/Times-Z/GeekMagic-Open-Firmware), v1.5.0, commit `9d31738bd653ca69b2fae979fec31bce9d20664f`. Os desenhos tradicionais foram adaptados de [HoloClawd-Open-Firmware](https://github.com/andrewjiang/HoloClawd-Open-Firmware).
+Based on [Times-Z/GeekMagic-Open-Firmware](https://github.com/Times-Z/GeekMagic-Open-Firmware), v1.5.0, commit `9d31738bd653ca69b2fae979fec31bce9d20664f`. Traditional drawing commands were adapted from [HoloClawd-Open-Firmware](https://github.com/andrewjiang/HoloClawd-Open-Firmware).
 
-Este repositório contém **somente firmware, ferramentas de build, documentação e binário**. Não contém cliente de agenda, integração Google, dados pessoais ou configuração de rede de uma instalação.
+This repository contains **only firmware, build tools, documentation, and the binary**. It does not include the calendar client, Google integration, personal data, or installation-specific network settings.
 
-## O que mudou
+## What's changed
 
-- **Cenas nativas:** um JSON compacto descreve texto, relógio e formas. O dispositivo mantém a cena e anima sem novas requisições por quadro.
-- **Sem apagão entre atualizações:** composição fora da tela em faixas de 240×8; somente linhas alteradas são transmitidas. Não há `clearScreen()` antes de substituir a cena.
-- **Relógio autônomo:** usa NTP, com epoch recebido como alternativa. A mudança de minuto é avaliada antes do limitador da animação.
-- **Pulso suave:** 40 níveis de intensidade, período configurável e passo de 100 ms. Exemplo com ciclo de quatro segundos, sem piscar abruptamente.
-- **Texto legível:** Noto Sans antialias 4 bpp, cinco tamanhos, UTF-8 com caracteres portugueses, corte por largura e reticências.
-- **HoloClawd Drawing API:** nove primitivas individuais e batch tradicional, além do modo de cena otimizado. Autenticação Bearer nas rotas de desenho.
-- **GIF sem limpeza obrigatória:** `keep_screen:true` em stop/play. Corrigido também o tempo do último quadro do GIF.
-- **Menos RAM:** 6.804 bytes de tabelas YCbCr movidos de DRAM para flash, preservando sinal e conversão de cores.
-- **Diagnóstico:** heap, maior bloco livre, fragmentação, uptime, motivo de reset, revisões e tempo/pixels de renderização.
+- **Native scenes:** compact JSON describes text, a clock, and shapes. The device retains the scene and animates it without a new request for each frame.
+- **No blank screen between updates:** offscreen composition in 240×8 strips; only changed rows are transmitted. No `clearScreen()` call before replacing a scene.
+- **Autonomous clock:** uses NTP, with a supplied epoch as a fallback. Minute changes are checked before the animation rate limiter.
+- **Smooth pulsing:** 40 intensity levels, a configurable period, and a 100 ms update interval. The example uses a four-second cycle without abrupt blinking.
+- **Readable text:** antialiased 4 bpp Noto Sans, five sizes, UTF-8 support including Portuguese characters, width clipping, and ellipsis truncation.
+- **HoloClawd Drawing API:** nine individual primitives and traditional batch drawing, plus the optimized scene mode. Drawing routes require Bearer authentication.
+- **GIF playback without mandatory clearing:** `keep_screen:true` for stop/play. The final GIF frame's timing is also fixed.
+- **Lower RAM usage:** 6,804 bytes of YCbCr tables moved from DRAM to flash while preserving signed values and color conversion.
+- **Diagnostics:** free heap, largest free block, fragmentation, uptime, reset reason, revisions, rendering time, and transmitted pixels.
 
-Mantidos: interface web, Wi-Fi/AP, NTP, LittleFS, configuração, autenticação, GIF, OTA e RescueMode. Desativados neste build: painel de métricas CPU/GPU do PC e log periódico de heap; o diagnóstico pela API permanece.
+Preserved: web interface, Wi-Fi/AP, NTP, LittleFS, configuration, authentication, GIF, OTA, and RescueMode. Disabled in this build: the PC CPU/GPU metrics dashboard and periodic heap logging; API diagnostics remain available.
 
-## Hardware e limites
+## Hardware and limits
 
-| Item | Configuração |
+| Item | Configuration |
 | --- | --- |
-| Dispositivo validado | SmallTV-Ultra |
-| MCU / ambiente | ESP8266 ESP-12E / `esp12e` |
-| LCD | ST7789, **240×240 nativos** |
+| Validated device | SmallTV-Ultra |
+| MCU / environment | ESP8266 ESP-12E / `esp12e` |
+| LCD | ST7789, **native 240×240** |
 | Flash | **4 MB, DIO, 40 MHz** |
 | Linker | `eagle.flash.4m2m.ld` |
-| RAM estática | **37.464 / 81.920 bytes** |
-| Flash de aplicação | **539.351 / 1.044.464 bytes** |
-| Imagem OTA | **543.504 bytes** |
-| Estado da cena no heap | **7.528 bytes**, somente quando ativo |
-| Buffer de composição | **3.840 bytes** |
+| Static RAM | **37,464 / 81,920 bytes** |
+| Application flash | **539,351 / 1,044,464 bytes** |
+| OTA image | **543,504 bytes** |
+| Scene state on the heap | **7,528 bytes**, allocated only while active |
+| Compositing buffer | **3,840 bytes** |
 
-RAM estática caiu de 43.664 para 37.464 bytes comparando com o build intermediário anterior à otimização: redução líquida de **6.200 bytes** mesmo com a cena nativa. O heap disponível em execução é outra métrica: no teste físico ficou em aproximadamente **22 KB**.
+Static RAM dropped from 43,664 to 37,464 bytes compared with the intermediate build before optimization: a net reduction of **6,200 bytes**, even with native scenes added. Available runtime heap is a separate metric: it was approximately **22 KB** in the physical device test.
 
-Um framebuffer RGB565 completo precisaria de 115.200 bytes. Por isso usamos faixas, hashes por linha e transferências agrupadas. A substituição não é uma troca atômica de framebuffer: uma mudança grande pode aparecer progressivamente durante a transferência SPI. O fundo recomendado é **preto puro `#000000`**; a resolução nunca é reduzida. No exemplo, ficam 5 px livres no topo e 10 px na base.
+A full RGB565 framebuffer would require 115,200 bytes. Instead, the renderer uses strips, per-row hashes, and grouped transfers. Scene replacement is not an atomic framebuffer swap: a large change may appear progressively during the SPI transfer. The recommended background is **pure black `#000000`**; resolution is never reduced. The example reserves 5 px at the top and 10 px at the bottom.
 
-## Compilar
+## Building
 
-Requisitos: Python 3.11+ e acesso à internet na primeira instalação das ferramentas. Não é necessário Poetry nem o aplicativo de agenda.
+Requirements: Python 3.11+ and internet access for the initial tool installation. Neither Poetry nor the calendar application is required.
 
 ```sh
 git clone https://github.com/bratao/geekmagic-smalltv-scene-firmware.git
@@ -49,7 +49,7 @@ cd geekmagic-smalltv-scene-firmware
 python -m venv .venv
 ```
 
-Ative o ambiente:
+Activate the environment:
 
 ```powershell
 # Windows PowerShell
@@ -61,71 +61,71 @@ Ative o ambiente:
 source .venv/bin/activate
 ```
 
-Instale as versões fixadas e compile:
+Install the pinned versions and build:
 
 ```sh
 python -m pip install -r requirements-build.txt
 python tools/build.py
 ```
 
-Saída: `.pio/build/esp12e/firmware.bin` e `firmware.elf`. O script **não grava o dispositivo**. Resolve as dependências, aplica o patch GFX com verificação SHA256, gera as fontes e faz build limpo. Não ignore o patch executando apenas `pio run` em uma instalação nova: isso perderia a economia de RAM.
+Output: `.pio/build/esp12e/firmware.bin` and `firmware.elf`. The script **does not flash the device**. It resolves dependencies, applies the SHA256-verified GFX patch, generates fonts, and performs a clean build. Do not skip the patch by running only `pio run` on a fresh installation: doing so would lose the RAM savings.
 
-Versões: PlatformIO 6.2.0; plataforma espressif8266 4.2.1; Arduino Core 3.1.2; ArduinoJson 7.4.3; Arduino_GFX 1.6.7; AnimatedGIF 2.2.3; Pillow 12.3.0. A versão embarcada é fixa em `firmware_version.txt`: `v1.5.0-smalltv-scene1`.
+Versions: PlatformIO 6.2.0; espressif8266 platform 4.2.1; Arduino Core 3.1.2; ArduinoJson 7.4.3; Arduino_GFX 1.6.7; AnimatedGIF 2.2.3; Pillow 12.3.0. The embedded version is fixed in `firmware_version.txt`: `v1.5.0-smalltv-scene1`.
 
-As fontes geradas estão incluídas; o TTF e sua licença estão em `assets/`. Para reativar métricas do PC, altere `SMALLTV_ENABLE_METRICS` e retire `-<dashboard/>` de `build_src_filter`; para o log periódico, altere `SMALLTV_HEAP_LOG`.
+Generated fonts are included; the TTF and its license are in `assets/`. To re-enable PC metrics, change `SMALLTV_ENABLE_METRICS` and remove `-<dashboard/>` from `build_src_filter`; for periodic logging, change `SMALLTV_HEAP_LOG`.
 
-## Binário e atualização
+## Binary and updates
 
-[**Baixar o firmware validado**](artifacts/firmware.bin) · [SHA256](artifacts/SHA256SUMS) · [Revisão estrutural](docs/binary-review.json)
+[**Download the validated firmware**](artifacts/firmware.bin) · [SHA256](artifacts/SHA256SUMS) · [Structural review](docs/binary-review.json)
 
-SHA256 do binário testado:
+SHA256 of the tested binary:
 
 ```text
 8f0a270972885aab13942fa31f8d6b375d5b5f2e7eebf676c470f8c5c8ce0964
 ```
 
-O binário foi instalado e validado em um SmallTV-Ultra que já executava GeekMagic Open Firmware. **Não é um pacote de migração universal do firmware de fábrica**. Verifique modelo/flash e use o procedimento de migração do upstream quando aplicável.
+The binary was installed and validated on a SmallTV-Ultra already running GeekMagic Open Firmware. **It is not a universal migration package for stock firmware.** Check the model and flash configuration, and follow the upstream migration procedure where applicable.
 
-Para atualizar uma instalação compatível, pare os clientes que enviam conteúdo e envie **somente firmware** por `/api/v1/ota/fw`, mantendo alimentação e rede estáveis:
+To update a compatible installation, stop clients that send display content and upload **only the firmware** through `/api/v1/ota/fw`, keeping power and network connectivity stable:
 
 ```sh
-curl -H "Authorization: Bearer SEU_TOKEN" \
+curl -H "Authorization: Bearer YOUR_TOKEN" \
   -F "file=@artifacts/firmware.bin" \
-  http://IP_DA_TV/api/v1/ota/fw
+  http://TV_IP/api/v1/ota/fw
 ```
 
-Não envie imagem LittleFS nem apague a flash para instalar esta atualização: isso preserva web, configuração e arquivos. Examine o JSON, pois o updater pode retornar HTTP 200 também em falhas. Sucesso deve conter `"status":"Upload successful"` e `"message":"Update OK (...)"`; o dispositivo reinicia depois.
+Do not upload a LittleFS image or erase flash to install this update: this preserves the web interface, configuration, and files. Inspect the JSON response, because the updater may return HTTP 200 even on failure. Success must contain `"status":"Upload successful"` and `"message":"Update OK (...)"`; the device then restarts.
 
-Após o boot, verifique `/api/v1/display/capabilities`, `/api/v1/draw/status`, web e `/api/v1/ota/status`. Guarde seu firmware anterior e um backup adequado antes de modificar outro aparelho. RescueMode/OTA foram mantidos; um dispositivo que não inicializa pode exigir recuperação serial física.
+After boot, check `/api/v1/display/capabilities`, `/api/v1/draw/status`, the web interface, and `/api/v1/ota/status`. Keep your previous firmware and an appropriate backup before modifying another device. RescueMode/OTA are preserved; a device that cannot boot may require physical serial recovery.
 
-## Usar a API
+## Using the API
 
-Documentação completa: **[docs/API.md](docs/API.md)**. Exemplo: **[examples/scene.json](examples/scene.json)**.
+Full documentation: **[docs/API.md](docs/API.md)**. Example: **[examples/scene.json](examples/scene.json)**.
 
 ```sh
-curl -H "Authorization: Bearer SEU_TOKEN" \
-  http://IP_DA_TV/api/v1/display/capabilities
+curl -H "Authorization: Bearer YOUR_TOKEN" \
+  http://TV_IP/api/v1/display/capabilities
 
-curl -H "Authorization: Bearer SEU_TOKEN" \
+curl -H "Authorization: Bearer YOUR_TOKEN" \
   -H "Content-Type: application/json" \
   --data-binary @examples/scene.json \
-  http://IP_DA_TV/api/v1/draw/batch
+  http://TV_IP/api/v1/draw/batch
 ```
 
-Troque `epoch` no exemplo pelo Unix timestamp atual se quiser a alternativa ao NTP. `tz_offset` é o deslocamento em segundos. O exemplo desenha uma tela; ele não consulta calendários ou tarefas.
+Replace `epoch` in the example with the current Unix timestamp if you need the NTP fallback. `tz_offset` is the offset in seconds. The example draws a screen; it does not fetch calendars or tasks.
 
-## Validação e limites da evidência
+## Validation and evidence limits
 
-- Revisão do código por agentes e revisão independente do **hash exato** do binário.
-- Verificados ambos os cabeçalhos eboot/aplicação, segmentos, XOR e CRC completo, DIO/4 MB e partições. Todas as tabelas YCbCr foram encontradas em flash.
-- Mesmo núcleo C++ executado no host com AddressSanitizer: 1.000 quadros e 128 cenas de até 32 nós, limites, UTF-8, canários, margens e viradas de minuto/meia-noite.
-- Teste físico: desenhos individuais/batch/cena, rejeições preservando a cena, autenticação, web, NTP e OTA; dez substituições e 30 amostras sem queda de heap ou reinício.
-- Primeira composição medida: aproximadamente 111 ms; quadros animados amostrados: até 16,8 ms. Animação e ausência de tela preta confirmadas visualmente.
+- Code review by agents and an independent review of the binary's **exact hash**.
+- Both eboot/application headers, segments, XOR checksums, full CRC, DIO/4 MB configuration, and partitions verified. All YCbCr tables confirmed in flash.
+- The same C++ core executed on the host with AddressSanitizer: 1,000 frames and 128 scenes of up to 32 nodes, testing bounds, UTF-8, canaries, margins, and minute/midnight transitions.
+- Physical device tests: individual drawing commands, batch and scene modes, rejected requests preserving the scene, authentication, web, NTP, and OTA; ten scene replacements and 30 samples without heap decline or restarts.
+- First measured composition: approximately 111 ms; sampled animated frames: up to 16.8 ms. Animation and the absence of black-screen transitions confirmed visually.
 
-A simulação foi do renderizador, **não um emulador completo do ESP8266/Wi-Fi/ST7789**. Não comprova watchdog, SPI, fragmentação ou operação indefinida. Consulte [o relatório resumido](docs/VALIDATION.md).
+The simulation covered the renderer; it was **not a complete ESP8266/Wi-Fi/ST7789 emulator**. It does not establish watchdog behavior, SPI reliability, fragmentation behavior, or indefinite operation. See [the validation summary](docs/VALIDATION.md).
 
-## Estrutura e licença
+## Repository layout and licensing
 
-`src/`, `include/` e `lib/`: firmware; `data/web/`: interface web preservada; `tools/`: build, fontes, patch e validação; `artifacts/`: binário; `examples/`: cena; `docs/`: API, alterações e validação.
+`src/`, `include/`, and `lib/`: firmware; `data/web/`: preserved web interface; `tools/`: build, fonts, patching, and validation; `artifacts/`: binary; `examples/`: scene; `docs/`: API, changes, and validation.
 
-GPL-3.0-or-later conforme [LICENSE](LICENSE) do upstream. Adaptações HoloClawd mantêm atribuição e [licença MIT](LICENSE-HoloClawd). Noto Sans: [SIL OFL 1.1](assets/OFL.txt). As alterações contra o commit base estão em [docs/changes.patch](docs/changes.patch); os ajustes de empacotamento/build deste repositório estão nos próprios arquivos.
+GPL-3.0-or-later under the upstream [LICENSE](LICENSE). HoloClawd adaptations retain attribution and the [MIT license](LICENSE-HoloClawd). Noto Sans: [SIL OFL 1.1](assets/OFL.txt). Changes against the base commit are in [docs/changes.patch](docs/changes.patch); this repository's packaging/build adjustments are in the corresponding files.
