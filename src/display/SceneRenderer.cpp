@@ -1,6 +1,8 @@
 #include "display/SceneRenderer.h"
 #include "display/DisplayManager.h"
+#include "diagnostics/ResourceDiagnostics.h"
 #include "../scene/SceneCore.h"
+#include <algorithm>
 #include <cstring>
 #include <ctime>
 #include <memory>
@@ -16,6 +18,7 @@ struct State {
     int32_t timezone = 0;
     uint32_t frames = 0, rows = 0, skipped = 0, lastRenderUs = 0;
     uint32_t revision = 0, renderedRevision = 0, maxRenderUs = 0, lastPixels = 0;
+    uint32_t pixelsDrawn = 0, transfers = 0;
     uint16_t previousMinute = 0xffff;
     uint8_t previousLevels[scene::MaxNodes] = {};
     bool dirtyAll = true;
@@ -169,14 +172,26 @@ void SceneRenderer::update() {
     s.lastFrameMs=now;
     const uint32_t started=micros();
     uint32_t dirtyBands=s.dirtyAll?((uint32_t(1)<<(scene::Height/scene::BandHeight))-1):0;
+    uint8_t left[scene::Height/scene::BandHeight], right[scene::Height/scene::BandHeight];
+    memset(left,s.dirtyAll?0:scene::Width,sizeof(left));
+    memset(right,s.dirtyAll?scene::Width:0,sizeof(right));
     for (unsigned i=0;i<s.scene.count;++i) {
         const scene::Node& node=s.scene.nodes[i];
         const bool clock=node.kind==scene::Kind::Clock;
         if (!clock && !node.pulse) continue;
         const uint8_t level=scene::pulseLevel(node,frame.tickMs);
         if ((clock && minuteChanged) || ((clock || node.pulse) && level!=s.previousLevels[i])) {
-            for (int band=0;band<scene::Height/scene::BandHeight;++band)
-                if (scene::intersectsBand(node,band*scene::BandHeight)) dirtyBands|=uint32_t(1)<<band;
+            scene::Bounds bounds{};
+            const bool colonOnly=clock && !minuteChanged && scene::clockPulseBounds(node,frame.minuteOfDay,bounds);
+            for (int band=0;band<scene::Height/scene::BandHeight;++band) {
+                const int y=band*scene::BandHeight;
+                if (colonOnly ? (bounds.right>bounds.left && bounds.bottom>y && bounds.top<y+scene::BandHeight)
+                              : scene::intersectsBand(node,y)) {
+                    dirtyBands|=uint32_t(1)<<band;
+                    left[band]=std::min<int>(left[band],colonOnly?bounds.left:0);
+                    right[band]=std::max<int>(right[band],colonOnly?bounds.right:scene::Width);
+                }
+            }
         }
         s.previousLevels[i]=level;
     }
@@ -200,16 +215,25 @@ void SceneRenderer::update() {
             const int first=row;
             while(row<scene::BandHeight && changed[row]) ++row;
             const int height=row-first;
+            const int bandIndex=y/scene::BandHeight;
+            const int x=left[bandIndex], width=right[bandIndex]-x;
+            // Pack forward in the existing scratch band; no framebuffer allocation.
+            // Row hashes above describe the full composition, including overlapping nodes.
+            if(width<scene::Width) for(int r=0;r<height;++r)
+                memmove(s.band+first*scene::Width+r*width,
+                    s.band+(first+r)*scene::Width+x,width*sizeof(uint16_t));
             DisplayManager::getGfx()->draw16bitRGBBitmap(
-                0,y+first,s.band+first*scene::Width,scene::Width,height);
-            s.lastPixels+=scene::Width*height;
+                x,y+first,s.band+first*scene::Width,width,height);
+            s.lastPixels+=width*height;++s.transfers;
         }
         yield();
     }
     s.fresh=false;s.dirtyAll=false;s.renderedRevision=s.revision;
+    s.pixelsDrawn+=s.lastPixels;
     if (dirtyBands) ++s.frames;
     s.lastRenderUs=micros()-started;
     if (s.lastRenderUs>s.maxRenderUs) s.maxRenderUs=s.lastRenderUs;
+    if (dirtyBands && ResourceDiagnostics::enabled()) ResourceDiagnostics::recordRender(s.lastRenderUs,s.lastPixels);
 }
 void SceneRenderer::status(JsonObject result) {
     result["active"]=active();result["free_heap"]=ESP.getFreeHeap();
@@ -223,5 +247,6 @@ void SceneRenderer::status(JsonObject result) {
         result["rows_skipped"]=state->skipped;result["last_render_us"]=state->lastRenderUs;
         result["revision"]=state->revision;result["rendered_revision"]=state->renderedRevision;
         result["max_render_us"]=state->maxRenderUs;result["last_pixels"]=state->lastPixels;
+        result["pixels_drawn"]=state->pixelsDrawn;result["spi_transfers"]=state->transfers;
     }
 }

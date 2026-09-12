@@ -1,0 +1,115 @@
+{
+  "mode": "scene",
+  "bg": "#000000",
+  "tz_offset": -10800,
+  "commands": [
+    {
+      "type": "clock",
+      "x": 10,
+      "y": 5,
+      "font": "clock",
+      "color": "#ffffff",
+      "period_ms": 4000,
+      "min": 64,
+      "max": 255
+    },
+    {
+      "type": "text",
+      "x": 153,
+      "y": 8,
+      "font": "small",
+      "color": "#ffffff",
+      "text": "sexta",
+      "w": 77
+    },
+    {
+      "type": "text",
+      "x": 153,
+      "y": 29,
+      "font": "meta",
+      "color": "#c5cbd3",
+      "text": "11/09",
+      "w": 77
+    },
+    {
+      "type": "line",
+      "x0": 10,
+      "y0": 50,
+      "x1": 229,
+      "y1": 50,
+      "color": "#444444"
+    },
+    {
+      "type": "text",
+      "x": 10,
+      "y": 55,
+      "font": "heading",
+      "color": "#55eaff",
+      "text": "Reuniões",
+      "w": 220
+    },
+    {
+      "type": "text",
+      "x": 10,
+      "y": 79,
+      "font": "title",
+      "color": "#ffffff",
+      "text": "Sem mais reuniões",
+      "w": 220
+    },
+    {
+      "type": "text",
+      "x": 10,
+      "y": 106,
+      "font": "meta",
+      "color": "#c5cbd3",
+      "text": "por hoje",
+      "w": 220
+    },
+    {
+      "type": "line",
+      "x0": 10,
+      "y0": 144,
+      "x1": 229,
+      "y1": 144,
+      "color": "#444444"
+    },
+    {
+      "type": "text",
+      "x": 10,
+      "y": 150,
+      "font": "heading",
+      "color": "#55eaff",
+      "text": "Tarefas para hoje",
+      "w": 220
+    },
+    {
+      "type": "text",
+      "x": 10,
+      "y": 173,
+      "font": "title",
+      "color": "#ff3030",
+      "text": "Revisar proposta",
+      "w": 220
+    },
+    {
+      "type": "text",
+      "x": 10,
+      "y": 197,
+      "font": "meta",
+      "color": "#c5cbd3",
+      "text": "Responder mensagens",
+      "w": 220
+    },
+    {
+      "type": "text",
+      "x": 10,
+      "y": 215,
+      "font": "small",
+      "color": "#c5cbd3",
+      "text": "+2 hoje",
+      "w": 220
+    }
+  ],
+  "epoch": 1789222442
+}

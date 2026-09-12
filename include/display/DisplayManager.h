@@ -46,6 +46,7 @@ class DisplayManager {
     static bool playGifFullScreen(const String& path, uint32_t timeMs = 0, bool keepScreen = false);
     static bool stopGif(bool keepScreen = false);
     static bool hasActiveContent();
+    static bool isGifPlaying();
     static void update();
     static void clearScreen();
 };

@@ -156,6 +156,21 @@ bool intersectsBand(const Node& n,int y) {
     return bottom>=y && top<y+BandHeight;
 }
 
+bool clockPulseBounds(const Node& n,uint16_t minuteOfDay,Bounds& bounds) {
+    if(n.kind!=Kind::Clock) return false;
+    const Font& f=font(n.font);
+    char value[6];const unsigned minute=minuteOfDay%1440;
+    std::snprintf(value,sizeof(value),"%02u:%02u",minute/60,minute%60);
+    // Truncation may replace the colon with an ellipsis; retain the general path.
+    if(textWidth(f,value,value+5,n.w)>n.w) return false;
+    const Glyph colon=glyph(f,':');
+    const int x=n.x+glyph(f,value[0]).advance+glyph(f,value[1]).advance+colon.x;
+    const int y=n.y+f.baseline+colon.y;
+    bounds={std::max({0,int(n.x),x}),std::max(0,y),
+        std::min({Width,int(n.x)+n.w,x+colon.w}),std::min(Height,y+colon.h)};
+    return true;
+}
+
 void renderBand(const Scene& s,const Frame& frame,int bandY,uint16_t* pixels) {
     if(!pixels || bandY<0 || bandY>Height-BandHeight) return;
     std::fill(pixels,pixels+Width*BandHeight,s.background);

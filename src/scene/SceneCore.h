@@ -23,6 +23,8 @@ struct Scene {
     uint8_t count = 0;
 };
 struct Frame { uint16_t minuteOfDay; uint32_t tickMs; };
+// Half-open native-pixel bounds. False means callers must use the whole node.
+struct Bounds { int left, top, right, bottom; };
 struct Glyph {
     uint16_t offset;
     uint16_t code;
@@ -38,6 +40,7 @@ struct Font {
 const Font& font(FontId id);
 uint8_t pulseLevel(const Node& node, uint32_t tickMs);
 bool intersectsBand(const Node& node, int bandY);
+bool clockPulseBounds(const Node& node, uint16_t minuteOfDay, Bounds& bounds);
 void renderBand(const Scene& scene, const Frame& frame, int bandY, uint16_t* pixels);
 uint32_t rowHash(const uint16_t* pixels);
 } // namespace scene

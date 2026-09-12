@@ -8,7 +8,23 @@ Authorization: Bearer SEU_TOKEN
 
 O token é o configurado na interface web do seu dispositivo. A API é HTTP na rede local. Não exponha diretamente a TV à internet.
 
-Current source version: **`v1.5.0-smalltv-scene3-web`**. This version adds the Wi-Fi and authentication behavior below; existing drawing contracts remain unchanged.
+Current source version: **`v1.5.0-smalltv-scene4-efficient`**. This version adds optional resource capture and reduces report-monitor polling and native clock-animation transfers. Existing Wi-Fi, authentication, and drawing contracts remain unchanged.
+
+## Optional resource capture — scene4-efficient
+
+Collection is disabled after boot and uses fixed RAM counters with no persistent logs. All routes require Bearer authentication:
+
+| Method and route | Behavior |
+| --- | --- |
+| `POST /diagnostics/resources` | `{"enabled":true,"duration_s":60}` starts a fresh capture; duration is 1–600 seconds and defaults to 60. `{"enabled":false}` stops and preserves results. |
+| `GET /diagnostics/resources` | Current/completed loop, native-render, transmitted-pixel, and heap counters. |
+| `DELETE /diagnostics/resources` | Stops and clears the capture. |
+
+POST success is `200 {"status":"ok"}`; invalid input is 400 and bodies over 256 bytes are 413. DELETE returns `200 {"status":"reset"}`. Captures stop automatically at the duration limit, checked at loop completion. Starting another capture replaces the previous one. Reboot discards all counters.
+
+Heap is sampled once per second while enabled. Rendering includes native scenes only, and time overlaps loop work. `cooperative_work_pct` is a wall-time activity indicator, **not measured CPU utilization, power, or temperature**. Avoid frequent GET polling during comparisons. Full field definitions, limitations, and usage are in [RESOURCE-DIAGNOSTICS.md](RESOURCE-DIAGNOSTICS.md); numerical comparisons are in [the performance report](PERFORMANCE-scene4-efficient.md).
+
+Clock-colon-only animation now sends cropped RGB565 regions at native resolution. Minute changes retain normal full affected-row redraws. No new drawing payload or animation command is required.
 
 ## WiFi profiles — scene2-wifi
 
@@ -236,6 +252,8 @@ Batch tradicional, sem `mode:"scene"`:
 Resposta: `200 {"status":"ok","processed":2}`. A validação ocorre antes de desenhar; a execução é sequencial e direta, portanto não há composição atômica de todo esse batch. Para painéis animados use o modo de cena.
 
 ## Diagnóstico — GET /draw/status
+
+The JSON below is a historical scene1 example. In scene4-efficient, `state_bytes` is 7,536 and two cumulative native-scene fields are added: `pixels_drawn` (submitted pixels) and `spi_transfers` (bitmap transfer calls). They reset when scene state is freed, and their 32-bit values wrap after 4,294,967,295; use bounded deltas rather than assuming indefinite monotonicity. Optional capture counters are separate.
 
 ```json
 {"active":true,"free_heap":22024,"max_free_block":16448,"reset_reason":"Software/System restart",

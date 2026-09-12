@@ -31,6 +31,7 @@
 #include "display/SceneRenderer.h"
 
 static Gif* g_gif = nullptr;
+bool DisplayManager::isGifPlaying() { return g_gif && g_gif->isPlaying(); }
 bool DisplayManager::hasActiveContent() { return g_gif != nullptr || SceneRenderer::active(); }
 
 extern ConfigManager configManager;

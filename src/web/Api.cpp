@@ -23,6 +23,7 @@
 #include <Updater.h>
 
 #include "web/Webserver.h"
+#include "diagnostics/ResourceDiagnostics.h"
 #include "web/Api.h"
 #include "display/DisplayManager.h"
 #include "display/SceneRenderer.h"
@@ -67,6 +68,33 @@ static constexpr int BEARER_LEN = 7;
  */
 void registerApiEndpoints(Webserver* webserver) {
     Logger::info("Registering API endpoints", "API");
+    webserver->raw().on("/api/v1/diagnostics/resources", HTTP_GET, [webserver]() {
+        if (!requireBearerToken(webserver)) return;
+        JsonDocument doc;ResourceDiagnostics::snapshot(doc.to<JsonObject>());
+        doc["cpu_mhz"]=ESP.getCpuFreqMHz();doc["wifi_sleep_mode"]=int(WiFi.getSleepMode());
+        String body;serializeJson(doc,body);setCorsHeaders(webserver);
+        webserver->raw().send(200,"application/json",body);
+    });
+    webserver->raw().on("/api/v1/diagnostics/resources", HTTP_POST, [webserver]() {
+        if (!requireBearerToken(webserver)) return;
+        auto& server=webserver->raw();setCorsHeaders(webserver);
+        if (server.arg("plain").length()>256) {server.send(413,"application/json","{}");return;}
+        JsonDocument doc;
+        if (deserializeJson(doc,server.arg("plain")) || !doc.is<JsonObject>() || !doc["enabled"].is<bool>() ||
+            (doc["duration_s"].isNull()==false && (!doc["duration_s"].is<uint32_t>() ||
+             doc["duration_s"].as<uint32_t>()<1 || doc["duration_s"].as<uint32_t>()>600))) {
+            server.send(400,"application/json","{\"error\":\"Use enabled boolean and duration_s 1..600\"}");return;
+        }
+        if (doc["enabled"].as<bool>()) ResourceDiagnostics::start(doc["duration_s"] | 60u);
+        else ResourceDiagnostics::stop();
+        server.send(200,"application/json","{\"status\":\"ok\"}");
+    });
+    webserver->raw().on("/api/v1/diagnostics/resources", HTTP_DELETE, [webserver]() {
+        if (!requireBearerToken(webserver)) return;
+        ResourceDiagnostics::stop();ResourceDiagnostics::reset();setCorsHeaders(webserver);
+        webserver->raw().send(200,"application/json","{\"status\":\"reset\"}");
+    });
+
     // Explicit local-web access: no browser-stored credential is needed.
     // A custom header plus strict local-IP Host/Origin prevents cross-site reads.
     webserver->raw().collectHeaders("Origin", "X-SmallTV-Web", "Sec-Fetch-Site");
@@ -326,7 +354,7 @@ void registerApiEndpoints(Webserver* webserver) {
         if (!requireBearerToken(webserver)) { return; }
         setCorsHeaders(webserver);
         webserver->raw().send(200, "application/json",
-            "{\"preserve_gif_screen\":true,\"gif_last_frame_delay\":true,\"drawing_api\":true,\"native_scene\":true,\"wifi_profiles\":3,\"wifi_async\":true,\"web_revision\":\"wifi3\",\"patch\":\"scene3-web\"}");
+            "{\"preserve_gif_screen\":true,\"gif_last_frame_delay\":true,\"drawing_api\":true,\"native_scene\":true,\"resource_diagnostics\":true,\"efficient_scene\":true,\"wifi_profiles\":3,\"wifi_async\":true,\"web_revision\":\"wifi3\",\"patch\":\"scene4-efficient\"}");
     });
 
     // @openapi {delete} /gif version=v1 group=GIF summary="Delete a GIF by name" requiresAuth=true

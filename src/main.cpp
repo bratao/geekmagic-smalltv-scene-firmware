@@ -1,3 +1,7 @@
+#include "diagnostics/ResourceDiagnostics.h"
+#ifndef SMALLTV_IDLE_WAIT
+#define SMALLTV_IDLE_WAIT 1
+#endif
 // SPDX-License-Identifier: GPL-3.0-or-later
 /*
  * GeekMagic Open Firmware
@@ -202,6 +206,8 @@ void loop() {
         return;
     }
 
+    const bool measuring=ResourceDiagnostics::enabled();
+    const uint32_t workStarted=measuring?micros():0;
     static bool bootStableMarked = false;
     if (!bootStableMarked && millis() >= BOOT_STABLE_MS) {
         RescueMode::markBootStable();
@@ -256,4 +262,11 @@ void loop() {
 #endif
 
     EspClass::wdtFeed();  // kick watchdog
+    const uint32_t workEnded=measuring?micros():0;
+#if SMALLTV_IDLE_WAIT
+    // Leave bounded time to the SDK instead of spinning between display deadlines.
+    // GIF playback retains a 1 ms poll interval; native/static reports use 10 ms.
+    delay(DisplayManager::isGifPlaying()?1:10);
+#endif
+    if (measuring) ResourceDiagnostics::recordLoop(uint32_t(workEnded-workStarted),uint32_t(micros()-workEnded));
 }
