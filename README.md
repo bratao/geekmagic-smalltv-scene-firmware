@@ -32,7 +32,7 @@ Leave the screen unattended and it switches off after **600,000 ms without an in
 
 Every parsed HTTP request counts, including web pages, status checks, and rejected requests. A polling browser or an application sending updates every two minutes will therefore keep it awake. Close polling pages and pause your client to let the timer expire. This is display power saving, not ESP deep sleep; electrical savings have not been measured.
 
-`GET /api/v1/display/power` reports the 10-minute timeout and cumulative `sleep_count`. **Reading it wakes the screen**, so check the counter after an idle test rather than polling during it. The timeout is fixed in this release. [Behavior and verification](docs/DISPLAY-POWER.md).
+`GET /api/v1/display/power` reports the 10-minute timeout and cumulative `sleep_count`. **Reading it wakes the screen**, so check the counter after an idle test rather than polling during it. The timeout is fixed in this release. Device validation recorded a completed sleep cycle and an awake, active scene after the next check. [Behavior and verification](docs/DISPLAY-POWER.md).
 
 ## What's changed
 

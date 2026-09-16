@@ -1,0 +1,34 @@
+{
+  "checked_at": "2026-09-16T17:45:43.513888+00:00",
+  "power_after_wake_request": {
+    "awake": true,
+    "idle_timeout_ms": 600000,
+    "idle_ms": 3,
+    "sleep_count": 1,
+    "request_wakes_display": true
+  },
+  "retained_scene": {
+    "active": true,
+    "free_heap": 16384,
+    "max_free_block": 11472,
+    "reset_reason": "Software/System restart",
+    "uptime_ms": 3690798,
+    "heap_fragmentation": 26,
+    "state_bytes": 7536,
+    "max_nodes": 32,
+    "text_capacity": 1536,
+    "nodes": 15,
+    "text_bytes": 175,
+    "frames": 14136,
+    "rows_drawn": 256557,
+    "rows_skipped": 320099,
+    "last_render_us": 10314,
+    "revision": 465,
+    "rendered_revision": 465,
+    "max_render_us": 118857,
+    "last_pixels": 168,
+    "pixels_drawn": 28941864,
+    "spi_transfers": 61140
+  },
+  "note": "The original timed test was interrupted; this follow-up checks the cumulative sleep counter and wake after the user closed the other drawing client."
+}

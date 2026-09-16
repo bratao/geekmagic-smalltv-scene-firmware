@@ -36,3 +36,9 @@ idle_timer_test.exe
 The release also passes the pinned ESP8266 build, binary checksum/layout/flash-table review in `binary-idle-review.json`, and 12 web regression tests. Host tests do not verify physical LCD output.
 
 For a device test, stop publishing clients, close polling browser tabs, submit a scene, record the power counter, and send no requests for at least 610 seconds. Then request power status once: the counter should increase and `awake` should be true. Check retained scene status and confirm the physical display is visible. Raw device evidence is recorded separately when the test completes.
+
+## Device result — 2026-09-16
+
+Firmware-only OTA accepted the exact 581,472-byte scene5-idle image. The first 610-second observation did not enter sleep because another client continued sending scenes (revision reached 309). The user closed that sender. The repeated timed process was interrupted, but the later follow-up returned `sleep_count: 1`, `awake: true`, and an active retained scene with approximately 61 minutes of uptime. This confirms a recorded sleep transition and an awake, responsive display state after the request. It does not measure the exact physical shutoff time, backlight current, or prove visually correct pixels. The exact timeout boundary is covered by the host timer test.
+
+Raw result: [idle-live-validation.json](idle-live-validation.json).
