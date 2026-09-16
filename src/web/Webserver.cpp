@@ -27,6 +27,7 @@
 #include <array>
 
 #include "web/Webserver.h"
+#include "display/DisplayManager.h"
 
 static constexpr size_t URI_BUF_SIZE = 192;
 static constexpr size_t PATH_BUF_SIZE = 256;
@@ -73,7 +74,15 @@ auto hasSuffix(const char* value, const char* suffix) -> bool {
 
 }  // namespace
 
-Webserver::Webserver(uint16_t port) : _server(port) {}
+Webserver::Webserver(uint16_t port) : _server(port) {
+    _server.addHook([](const String&, const String&, WiFiClient*,
+                       ESP8266WebServer::ContentTypeFunction) {
+        // Called for each parsed HTTP request, including raw API/static routes.
+        // Internal clock ticks and redraws deliberately do not extend the timer.
+        DisplayManager::noteRequest();
+        return ESP8266WebServer::CLIENT_REQUEST_CAN_CONTINUE;
+    });
+}
 
 /**
  * @brief Initializes the LittleFS filesystem

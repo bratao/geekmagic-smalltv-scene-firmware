@@ -8,7 +8,7 @@ Authorization: Bearer SEU_TOKEN
 
 O token é o configurado na interface web do seu dispositivo. A API é HTTP na rede local. Não exponha diretamente a TV à internet.
 
-Current source version: **`v1.5.0-smalltv-scene4-efficient`**. This version adds optional resource capture and reduces report-monitor polling and native clock-animation transfers. Existing Wi-Fi, authentication, and drawing contracts remain unchanged.
+Current source version: **`v1.5.0-smalltv-scene5-idle`**. This release adds automatic display sleep after ten minutes without requests, preserving the resource capture and rendering improvements from scene4. Existing Wi-Fi, authentication, and drawing contracts remain unchanged.
 
 ## Optional resource capture — scene4-efficient
 
@@ -326,3 +326,8 @@ A web permanece na raiz `/`. O fallback `/legacyupdate` é disponibilizado pelo 
 - OTA pode responder **HTTP 200 com erro no JSON**. Para sucesso, verifique `status:"Upload successful"` e a mensagem de conclusão; não use apenas o status HTTP.
 - O parser do webserver recebe o corpo antes da validação da rota: os limites reduzem a carga aceita pelo renderer, mas não devem ser tratados como proteção contra tráfego hostil ilimitado.
 
+
+
+## Display idle power mode (scene5)
+
+All incoming HTTP requests reset the fixed 10-minute display timer and wake the LCD. Internal animation does not. `GET /api/v1/display/power` returns `awake`, `idle_timeout_ms`, `idle_ms`, `sleep_count`, and `request_wakes_display`; Bearer authentication is required. Reading status also wakes the screen. See [DISPLAY-POWER.md](DISPLAY-POWER.md) for behavior and testing.

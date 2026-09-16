@@ -67,6 +67,17 @@ static constexpr int BEARER_LEN = 7;
  * @return void
  */
 void registerApiEndpoints(Webserver* webserver) {
+    webserver->raw().on("/api/v1/display/power", HTTP_GET, [webserver]() {
+        if (!requireBearerToken(webserver)) return;
+        JsonDocument doc;
+        doc["awake"] = !DisplayManager::sleeping();
+        doc["idle_timeout_ms"] = 600000;
+        doc["idle_ms"] = DisplayManager::idleMs();
+        doc["sleep_count"] = DisplayManager::sleepCount();
+        doc["request_wakes_display"] = true;
+        String body; serializeJson(doc, body); setCorsHeaders(webserver);
+        webserver->raw().send(200, "application/json", body);
+    });
     Logger::info("Registering API endpoints", "API");
     webserver->raw().on("/api/v1/diagnostics/resources", HTTP_GET, [webserver]() {
         if (!requireBearerToken(webserver)) return;
@@ -354,7 +365,7 @@ void registerApiEndpoints(Webserver* webserver) {
         if (!requireBearerToken(webserver)) { return; }
         setCorsHeaders(webserver);
         webserver->raw().send(200, "application/json",
-            "{\"preserve_gif_screen\":true,\"gif_last_frame_delay\":true,\"drawing_api\":true,\"native_scene\":true,\"resource_diagnostics\":true,\"efficient_scene\":true,\"wifi_profiles\":3,\"wifi_async\":true,\"web_revision\":\"wifi3\",\"patch\":\"scene4-efficient\"}");
+            "{\"preserve_gif_screen\":true,\"gif_last_frame_delay\":true,\"drawing_api\":true,\"native_scene\":true,\"resource_diagnostics\":true,\"display_idle_sleep\":true,\"idle_timeout_ms\":600000,\"efficient_scene\":true,\"wifi_profiles\":3,\"wifi_async\":true,\"web_revision\":\"wifi3\",\"patch\":\"scene5-idle\"}");
     });
 
     // @openapi {delete} /gif version=v1 group=GIF summary="Delete a GIF by name" requiresAuth=true

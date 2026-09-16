@@ -29,6 +29,7 @@
 #include "config/ConfigManager.h"
 #include "display/Gif.h"
 #include "display/SceneRenderer.h"
+#include "display/IdleTimer.h"
 
 static Gif* g_gif = nullptr;
 bool DisplayManager::isGifPlaying() { return g_gif && g_gif->isPlaying(); }
@@ -38,6 +39,21 @@ extern ConfigManager configManager;
 
 static Arduino_HWSPI g_lcdBus = Arduino_HWSPI(LCD_DC_GPIO, -1, &SPI, true);
 static Arduino_ST7789 g_lcd = Arduino_ST7789(&g_lcdBus, -1, 0, true, LCD_W, LCD_H);
+static IdleTimer idleTimer;
+static uint32_t idleSleepCount = 0;
+
+bool DisplayManager::sleeping() { return idleTimer.sleeping(); }
+uint32_t DisplayManager::idleMs() { return idleTimer.elapsed(millis()); }
+uint32_t DisplayManager::sleepCount() { return idleSleepCount; }
+void DisplayManager::noteRequest() {
+    const bool wake = idleTimer.sleeping();
+    idleTimer.activity(millis());
+    if (wake) {
+        g_lcd.displayOn();
+        if (g_gif) g_gif->resumeAfterDisplaySleep();
+        digitalWrite(LCD_BACKLIGHT_GPIO, LCD_BACKLIGHT_ACTIVE_LOW ? LOW : HIGH);
+    }
+}
 
 static constexpr uint32_t LCD_HARDWARE_RESET_DELAY_MS = 120;
 static constexpr uint32_t LCD_BEGIN_DELAY_MS = 10;
@@ -708,6 +724,12 @@ auto DisplayManager::stopGif(bool keepScreen) -> bool {
  * @return void
  */
 auto DisplayManager::update() -> void {
+    if (idleTimer.expire(millis())) {
+        digitalWrite(LCD_BACKLIGHT_GPIO, LCD_BACKLIGHT_ACTIVE_LOW ? HIGH : LOW);
+        g_lcd.displayOff();
+        ++idleSleepCount;
+    }
+    if (idleTimer.sleeping()) return;
     if (SceneRenderer::active()) {
         SceneRenderer::update();
         return;

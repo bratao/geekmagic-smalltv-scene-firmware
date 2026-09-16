@@ -37,6 +37,8 @@ class Gif {
     auto stop() -> void;
     auto isPlaying() const -> bool;
     auto setLoopEnabled(bool enabled) -> void;
+    // Idle sleep is not playback time; avoid the per-file watchdog on wake.
+    void resumeAfterDisplaySleep() { m_startMs = millis(); m_lastFrameMs = millis(); }
 
    private:
     AnimatedGIF* m_gif;

@@ -48,5 +48,9 @@ class DisplayManager {
     static bool hasActiveContent();
     static bool isGifPlaying();
     static void update();
+    static void noteRequest();
+    static bool sleeping();
+    static uint32_t idleMs();
+    static uint32_t sleepCount();
     static void clearScreen();
 };

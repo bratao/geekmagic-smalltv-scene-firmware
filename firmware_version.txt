@@ -1,1 +1,1 @@
-v1.5.0-smalltv-scene4-efficient
+v1.5.0-smalltv-scene5-idle

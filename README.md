@@ -1,10 +1,38 @@
 # GeekMagic SmallTV Scene Firmware
 
-Firmware for **SmallTV-Ultra / ESP8266**, featuring a **Drawing API**, retained scenes, a local clock and animation, updates without clearing the screen to black, and reduced RAM usage.
+### Tiny screen. Native intelligence. A whole new way to build desktop displays.
 
-Based on [Times-Z/GeekMagic-Open-Firmware](https://github.com/Times-Z/GeekMagic-Open-Firmware), v1.5.0, commit `9d31738bd653ca69b2fae979fec31bce9d20664f`. Traditional drawing commands were adapted from [HoloClawd-Open-Firmware](https://github.com/andrewjiang/HoloClawd-Open-Firmware).
+Turn a **240×240 SmallTV-Ultra** into a programmable, always-ready display for calendars, focus timers, notifications, home automation, and live dashboards. Send a compact JSON scene once: the ESP8266 takes care of crisp text, a local clock, and animation—without uploading a new image for every tick.
 
-This repository contains **only firmware, build tools, documentation, and the binary**. It does not include the calendar client, Google integration, personal data, or installation-specific network settings.
+**Smooth updates · Native resolution · Local rendering · Automatic screen sleep · Open source**
+
+[Get the firmware](artifacts/firmware.bin) · [Try the Drawing API](docs/API.md) · [See measured improvements](docs/PERFORMANCE-scene4-efficient.md) · [Build it yourself](#building)
+
+## Small hardware. Big improvements.
+
+| Upgrade | What you get |
+| --- | --- |
+| **A scene engine on an ESP8266** | Retained text, shapes, and clocks with a 3,840-byte compositing buffer—no full-screen framebuffer required. |
+| **Draw only what changes** | Dirty regions and cropped colon transfers keep updates smooth at the full native 240×240 resolution. |
+| **A clock that lives on the TV** | Minute changes and animation continue locally, without a network round trip for each tick. |
+| **Sleep when nobody needs it** | After 10 minutes without an HTTP request, the backlight and LCD controller switch off. The next request wakes the screen. |
+| **Readable, multilingual text** | Antialiased Noto Sans, Portuguese accents, five sizes, clipping, and automatic ellipsis. |
+| **Less work, more headroom** | 6,804 bytes moved from RAM to flash; bounded rendering and optional, self-expiring diagnostics. |
+| **An easier device to live with** | Three Wi-Fi profiles, asynchronous connection management, automatic local-web authorization, and firmware-only updates. |
+
+The scene4 benchmark measured **94.76% fewer transmitted RGB565 bytes** and **85.93% less main-loop work time** for its animated report; the static report measured **98.77% less main-loop work time**. These are workload-specific transfer and cooperative timing results—not measured electrical power, temperature, or CPU utilization. [Read the methodology and limits](docs/PERFORMANCE-scene4-efficient.md).
+
+This fork builds on [Times-Z/GeekMagic-Open-Firmware](https://github.com/Times-Z/GeekMagic-Open-Firmware), v1.5.0, commit `9d31738bd653ca69b2fae979fec31bce9d20664f`, with traditional drawing commands adapted from [HoloClawd](https://github.com/andrewjiang/HoloClawd-Open-Firmware). Credit to those projects for the foundation that makes these improvements possible.
+
+This repository contains firmware, build tools, documentation, and release images. Calendar and automation integrations are clients you connect to it; no Google account or cloud service is built in.
+
+## New in scene5: automatic display sleep
+
+Leave the screen unattended and it switches off after **600,000 ms without an incoming HTTP request**. Wi-Fi stays connected, so the next request—including a draw command—turns it back on. Scene/GIF updates pause while sleeping; retained content remains available. Internal clock ticks, GIF frames, and NTP traffic do not keep it awake.
+
+Every parsed HTTP request counts, including web pages, status checks, and rejected requests. A polling browser or an application sending updates every two minutes will therefore keep it awake. Close polling pages and pause your client to let the timer expire. This is display power saving, not ESP deep sleep; electrical savings have not been measured.
+
+`GET /api/v1/display/power` reports the 10-minute timeout and cumulative `sleep_count`. **Reading it wakes the screen**, so check the counter after an idle test rather than polling during it. The timeout is fixed in this release. [Behavior and verification](docs/DISPLAY-POWER.md).
 
 ## What's changed
 
@@ -74,21 +102,21 @@ python tools/build.py
 
 Output: `.pio/build/esp12e/firmware.bin` and `firmware.elf`. The script **does not flash the device**. It resolves dependencies, applies the SHA256-verified GFX patch, generates fonts, and performs a clean build. Do not skip the patch by running only `pio run` on a fresh installation: doing so would lose the RAM savings.
 
-Versions: PlatformIO 6.2.0; espressif8266 platform 4.2.1; Arduino Core 3.1.2; ArduinoJson 7.4.3; Arduino_GFX 1.6.7; AnimatedGIF 2.2.3; Pillow 12.3.0. The current source version is `v1.5.0-smalltv-scene4-efficient` in `firmware_version.txt`. The packaged image and structural review below match this source version. Physical checks remain separate from build validation.
+Versions: PlatformIO 6.2.0; espressif8266 platform 4.2.1; Arduino Core 3.1.2; ArduinoJson 7.4.3; Arduino_GFX 1.6.7; AnimatedGIF 2.2.3; Pillow 12.3.0. The current source version is `v1.5.0-smalltv-scene5-idle` in `firmware_version.txt`. The packaged image and structural review below match this source version. Physical checks remain separate from build validation.
 
 Generated fonts are included; the TTF and its license are in `assets/`. To re-enable PC metrics, change `SMALLTV_ENABLE_METRICS` and remove `-<dashboard/>` from `build_src_filter`; for periodic logging, change `SMALLTV_HEAP_LOG`.
 
 ## Binary and updates
 
-[**Download scene4-efficient firmware**](artifacts/firmware.bin) · [SHA256](artifacts/SHA256SUMS) · [Structural review](docs/binary-efficient-review.json)
+[**Download scene5-idle firmware**](artifacts/firmware.bin) · [SHA256](artifacts/SHA256SUMS) · [Structural review](docs/binary-idle-review.json)
 
-SHA256 of the packaged scene4-efficient binary:
+SHA256 of the packaged scene5-idle binary:
 
 ```text
-2b829127427c2fcf8277d0abb2a7433532f3affbe2c4434b6f6eec000119d2d3
+38bce50a98e2c56865f67ac8bde344be5cfd83a10b2732966eabd60a6818d302
 ```
 
-The scene4-efficient structural review passed for the exact image above. Measurement results and verification scope are recorded in the [performance report](docs/PERFORMANCE-scene4-efficient.md).
+The scene5-idle structural review passed for the exact image above. It uses 39,644 bytes of static RAM, 577,319 bytes of application flash, and a 581,472-byte OTA image. The following performance results belong to the prior scene4 release. Measurement results and verification scope are recorded in the [performance report](docs/PERFORMANCE-scene4-efficient.md).
 
 Historical scene3-web validation: the build, exact-binary structural review, 12 mocked web tests and targeted live checks passed. Firmware-only OTA reported `Update OK` for all 575,184 bytes. The token and two saved profiles survived the upgrade; Chrome loaded authorization automatically after its browser token copy was cleared. Local bootstrap restrictions and masked prefill were verified. See [scene3-web validation](docs/VALIDATION-scene3-web.md). This is not a universal migration package for stock firmware; check the model and flash configuration and follow the upstream migration procedure where applicable.
 
